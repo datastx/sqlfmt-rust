@@ -1,0 +1,320 @@
+use crate::comment::Comment;
+use crate::node::{Node, NodeIndex};
+use crate::token::Token;
+
+/// A Line is a collection of Nodes intended to be printed on one line,
+/// plus any attached comments.
+#[derive(Debug, Clone)]
+pub struct Line {
+    pub previous_node: Option<NodeIndex>,
+    pub nodes: Vec<NodeIndex>,
+    pub comments: Vec<Comment>,
+    pub formatting_disabled: Vec<Token>,
+}
+
+impl Line {
+    pub fn new(previous_node: Option<NodeIndex>) -> Self {
+        Self {
+            previous_node,
+            nodes: Vec::new(),
+            comments: Vec::new(),
+            formatting_disabled: Vec::new(),
+        }
+    }
+
+    pub fn is_blank_line(&self, arena: &[Node]) -> bool {
+        self.nodes.len() == 1
+            && arena[self.nodes[0]].is_newline()
+            && self.comments.is_empty()
+    }
+
+    /// Depth of the first non-newline node.
+    pub fn depth(&self, arena: &[Node]) -> (usize, usize) {
+        for &idx in &self.nodes {
+            if !arena[idx].is_newline() {
+                return arena[idx].depth();
+            }
+        }
+        // Blank line: use previous_node depth or (0,0)
+        self.previous_node
+            .map(|i| arena[i].depth())
+            .unwrap_or((0, 0))
+    }
+
+    /// Number of spaces for indentation: 4 per SQL depth + 4 per Jinja depth.
+    pub fn indent_size(&self, arena: &[Node]) -> usize {
+        let (sql, jinja) = self.depth(arena);
+        4 * (sql + jinja)
+    }
+
+    /// Indentation prefix string.
+    pub fn indentation(&self, arena: &[Node]) -> String {
+        " ".repeat(self.indent_size(arena))
+    }
+
+    /// Render the line to a string (nodes only, no standalone comments).
+    pub fn render(&self, arena: &[Node]) -> String {
+        if self.is_blank_line(arena) {
+            return "\n".to_string();
+        }
+        let mut result = String::new();
+        for (i, &idx) in self.nodes.iter().enumerate() {
+            let node = &arena[idx];
+            if node.is_newline() {
+                continue;
+            }
+            if i == 0 || (i == 1 && arena[self.nodes[0]].is_newline()) {
+                // First content node: use indentation instead of prefix
+                result.push_str(&self.indentation(arena));
+                result.push_str(&node.value);
+            } else {
+                result.push_str(&node.to_formatted_string());
+            }
+        }
+        result.push('\n');
+        result
+    }
+
+    /// Render with comments, respecting max_line_length.
+    pub fn render_with_comments(&self, arena: &[Node], max_line_length: usize) -> String {
+        if self.comments.is_empty() {
+            return self.render(arena);
+        }
+
+        let mut result = String::new();
+        let prefix = self.indentation(arena);
+
+        // Standalone comments go before the line
+        for comment in &self.comments {
+            if comment.is_standalone {
+                result.push_str(&comment.render_standalone(&prefix, max_line_length));
+            }
+        }
+
+        // Render the main line content
+        let base = self.render(arena);
+        if self.is_blank_line(arena) && !result.is_empty() {
+            // If the line is blank but we wrote comments, just return comments
+            return result;
+        }
+
+        // Inline comments appended at end of line
+        let inline_comments: Vec<&Comment> =
+            self.comments.iter().filter(|c| c.is_inline()).collect();
+        if inline_comments.is_empty() {
+            result.push_str(&base);
+        } else {
+            // Strip trailing newline, add inline comment, re-add newline
+            let trimmed = base.trim_end_matches('\n');
+            result.push_str(trimmed);
+            for c in inline_comments {
+                result.push_str(&c.render_inline());
+            }
+            result.push('\n');
+        }
+
+        result
+    }
+
+    /// Length of the rendered line (longest sub-line if multiline Jinja).
+    pub fn len(&self, arena: &[Node]) -> usize {
+        self.render(arena)
+            .lines()
+            .map(|l| l.len())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// True if the line has no nodes.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    // --- Content node helpers ---
+
+    /// Get the first non-newline node.
+    pub fn first_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+        self.nodes
+            .iter()
+            .map(|&i| &arena[i])
+            .find(|n| !n.is_newline())
+    }
+
+    /// Get the last non-newline node.
+    pub fn last_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+        self.nodes
+            .iter()
+            .rev()
+            .map(|&i| &arena[i])
+            .find(|n| !n.is_newline())
+    }
+
+    // --- Classification properties ---
+
+    pub fn starts_with_comma(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_comma())
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_operator(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_operator(arena))
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_unterm_keyword(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_unterm_keyword())
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_boolean_operator(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_boolean_operator())
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_set_operator(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_set_operator())
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_semicolon(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_semicolon())
+            .unwrap_or(false)
+    }
+
+    pub fn starts_with_opening_bracket(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_opening_bracket())
+            .unwrap_or(false)
+    }
+
+    pub fn closes_bracket_from_previous_line(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_closing_bracket())
+            .unwrap_or(false)
+    }
+
+    pub fn contains_operator(&self, arena: &[Node]) -> bool {
+        self.nodes.iter().any(|&i| arena[i].is_operator(arena))
+    }
+
+    pub fn contains_jinja(&self, arena: &[Node]) -> bool {
+        self.nodes.iter().any(|&i| arena[i].is_jinja())
+    }
+
+    pub fn contains_multiline_jinja(&self, arena: &[Node]) -> bool {
+        self.nodes.iter().any(|&i| arena[i].is_multiline_jinja())
+    }
+
+    pub fn ends_with_comma(&self, arena: &[Node]) -> bool {
+        self.last_content_node(arena)
+            .map(|n| n.is_comma())
+            .unwrap_or(false)
+    }
+
+    pub fn ends_with_opening_bracket(&self, arena: &[Node]) -> bool {
+        self.last_content_node(arena)
+            .map(|n| n.is_opening_bracket())
+            .unwrap_or(false)
+    }
+
+    /// True if this line marks the start of a new segment.
+    pub fn starts_new_segment(&self, arena: &[Node]) -> bool {
+        if self.is_blank_line(arena) {
+            return self.depth(arena) == (0, 0);
+        }
+        self.closes_bracket_from_previous_line(arena)
+            || self.starts_with_unterm_keyword(arena)
+            || self.starts_with_set_operator(arena)
+            || self.starts_with_semicolon(arena)
+    }
+
+    /// True if formatting is disabled for this line.
+    pub fn has_formatting_disabled(&self) -> bool {
+        !self.formatting_disabled.is_empty()
+    }
+
+    /// Append a node index to this line.
+    pub fn append_node(&mut self, node_idx: NodeIndex) {
+        self.nodes.push(node_idx);
+    }
+
+    /// Append a comment to this line.
+    pub fn append_comment(&mut self, comment: Comment) {
+        self.comments.push(comment);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token::{Token, TokenType};
+
+    fn make_node_in_arena(
+        arena: &mut Vec<Node>,
+        token_type: TokenType,
+        value: &str,
+        prefix: &str,
+    ) -> NodeIndex {
+        let idx = arena.len();
+        let prev = if idx > 0 { Some(idx - 1) } else { None };
+        arena.push(Node::new(
+            Token::new(token_type, "", value, 0, value.len()),
+            prev,
+            prefix.to_string(),
+            value.to_string(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        idx
+    }
+
+    #[test]
+    fn test_blank_line() {
+        let mut arena = Vec::new();
+        let idx = make_node_in_arena(&mut arena, TokenType::Newline, "\n", "");
+        let mut line = Line::new(None);
+        line.append_node(idx);
+        assert!(line.is_blank_line(&arena));
+    }
+
+    #[test]
+    fn test_line_depth() {
+        let mut arena = Vec::new();
+        let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
+        arena[idx].open_brackets = vec![99]; // 1 open bracket
+        let mut line = Line::new(None);
+        line.append_node(idx);
+        assert_eq!(line.depth(&arena), (1, 0));
+        assert_eq!(line.indent_size(&arena), 4);
+    }
+
+    #[test]
+    fn test_render_simple() {
+        let mut arena = Vec::new();
+        make_node_in_arena(&mut arena, TokenType::Newline, "\n", "");
+        let select_idx = make_node_in_arena(&mut arena, TokenType::UntermKeyword, "select", "");
+        let name_idx = make_node_in_arena(&mut arena, TokenType::Name, "a", " ");
+
+        let mut line = Line::new(Some(0));
+        line.nodes.push(select_idx);
+        line.nodes.push(name_idx);
+
+        let rendered = line.render(&arena);
+        assert_eq!(rendered, "select a\n");
+    }
+
+    #[test]
+    fn test_starts_with_comma() {
+        let mut arena = Vec::new();
+        let idx = make_node_in_arena(&mut arena, TokenType::Comma, ",", "");
+        let mut line = Line::new(None);
+        line.append_node(idx);
+        assert!(line.starts_with_comma(&arena));
+    }
+}

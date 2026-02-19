@@ -1,0 +1,307 @@
+use crate::token::{Token, TokenType};
+
+/// Index into the node arena (Vec<Node>).
+pub type NodeIndex = usize;
+
+/// A Node wraps a Token with formatting metadata: depth, open brackets,
+/// open Jinja blocks, and a link to the previous node.
+#[derive(Debug, Clone)]
+pub struct Node {
+    pub token: Token,
+    pub previous_node: Option<NodeIndex>,
+    pub prefix: String,
+    pub value: String,
+    pub open_brackets: Vec<NodeIndex>,
+    pub open_jinja_blocks: Vec<NodeIndex>,
+    pub formatting_disabled: Vec<Token>,
+}
+
+impl Node {
+    pub fn new(
+        token: Token,
+        previous_node: Option<NodeIndex>,
+        prefix: String,
+        value: String,
+        open_brackets: Vec<NodeIndex>,
+        open_jinja_blocks: Vec<NodeIndex>,
+    ) -> Self {
+        Self {
+            token,
+            previous_node,
+            prefix,
+            value,
+            open_brackets,
+            open_jinja_blocks,
+            formatting_disabled: Vec::new(),
+        }
+    }
+
+    /// Depth is (sql_bracket_depth, jinja_block_depth).
+    pub fn depth(&self) -> (usize, usize) {
+        (self.open_brackets.len(), self.open_jinja_blocks.len())
+    }
+
+    /// Formatted string: prefix + value.
+    pub fn to_formatted_string(&self) -> String {
+        format!("{}{}", self.prefix, self.value)
+    }
+
+    /// Character length of the formatted string.
+    pub fn len(&self) -> usize {
+        self.prefix.len() + self.value.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    // --- Token type classification ---
+
+    pub fn is_unterm_keyword(&self) -> bool {
+        self.token.token_type == TokenType::UntermKeyword
+    }
+
+    pub fn is_comma(&self) -> bool {
+        self.token.token_type == TokenType::Comma
+    }
+
+    pub fn is_opening_bracket(&self) -> bool {
+        self.token.token_type.is_opening_bracket()
+    }
+
+    pub fn is_closing_bracket(&self) -> bool {
+        self.token.token_type.is_closing_bracket()
+    }
+
+    pub fn is_opening_jinja_block(&self) -> bool {
+        matches!(
+            self.token.token_type,
+            TokenType::JinjaBlockStart | TokenType::JinjaBlockKeyword
+        )
+    }
+
+    pub fn is_closing_jinja_block(&self) -> bool {
+        self.token.token_type == TokenType::JinjaBlockEnd
+    }
+
+    pub fn is_jinja(&self) -> bool {
+        self.token.token_type.is_jinja()
+    }
+
+    pub fn is_jinja_statement(&self) -> bool {
+        self.token.token_type.is_jinja_statement()
+    }
+
+    pub fn is_boolean_operator(&self) -> bool {
+        self.token.token_type == TokenType::BooleanOperator
+    }
+
+    pub fn is_newline(&self) -> bool {
+        self.token.token_type == TokenType::Newline
+    }
+
+    pub fn is_multiline_jinja(&self) -> bool {
+        self.token.token_type.is_jinja() && self.value.contains('\n')
+    }
+
+    pub fn divides_queries(&self) -> bool {
+        self.token.token_type.divides_queries()
+    }
+
+    pub fn is_set_operator(&self) -> bool {
+        self.token.token_type == TokenType::SetOperator
+    }
+
+    pub fn is_semicolon(&self) -> bool {
+        self.token.token_type == TokenType::Semicolon
+    }
+
+    pub fn is_star(&self) -> bool {
+        self.token.token_type == TokenType::Star
+    }
+
+    pub fn is_name(&self) -> bool {
+        self.token.token_type == TokenType::Name
+    }
+
+    pub fn is_quoted_name(&self) -> bool {
+        self.token.token_type == TokenType::QuotedName
+    }
+
+    pub fn is_dot(&self) -> bool {
+        self.token.token_type == TokenType::Dot
+    }
+
+    pub fn is_comment(&self) -> bool {
+        self.token.token_type == TokenType::Comment
+    }
+
+    pub fn is_fmt_off(&self) -> bool {
+        self.token.token_type == TokenType::FmtOff
+    }
+
+    pub fn is_fmt_on(&self) -> bool {
+        self.token.token_type == TokenType::FmtOn
+    }
+
+    // --- Context-dependent classification ---
+
+    /// True if this STAR token acts as multiplication (not SELECT *).
+    pub fn is_multiplication_star(&self, arena: &[Node]) -> bool {
+        if self.token.token_type != TokenType::Star {
+            return false;
+        }
+        match self.get_previous_sql_token(arena) {
+            None => false,
+            Some(t) => !matches!(
+                t.token_type,
+                TokenType::UntermKeyword
+                    | TokenType::Comma
+                    | TokenType::Dot
+                    | TokenType::BracketOpen
+                    | TokenType::StatementStart
+            ),
+        }
+    }
+
+    /// True if this bracket acts as an operator (e.g., array indexing with `[`).
+    pub fn is_bracket_operator(&self, arena: &[Node]) -> bool {
+        if self.token.token_type != TokenType::BracketOpen {
+            return false;
+        }
+        match self.get_previous_sql_token(arena) {
+            None => false,
+            Some(t) => {
+                if self.value == "[" {
+                    matches!(
+                        t.token_type,
+                        TokenType::Name | TokenType::QuotedName | TokenType::BracketClose
+                    )
+                } else {
+                    self.value == "("
+                        && t.token_type == TokenType::BracketClose
+                        && t.token.contains('>')
+                }
+            }
+        }
+    }
+
+    /// True if this node acts as an operator in context.
+    pub fn is_operator(&self, arena: &[Node]) -> bool {
+        self.token.token_type.is_always_operator()
+            || self.is_multiplication_star(arena)
+            || self.is_bracket_operator(arena)
+    }
+
+    /// Walk backward through previous_node links, skipping NEWLINE and
+    /// JINJA_STATEMENT, to find the previous "meaningful" SQL token.
+    pub fn get_previous_sql_token<'a>(&self, arena: &'a [Node]) -> Option<&'a Token> {
+        let mut idx = self.previous_node;
+        while let Some(i) = idx {
+            let node = &arena[i];
+            if node.token.token_type.does_not_set_prev_sql_context() {
+                idx = node.previous_node;
+            } else {
+                return Some(&node.token);
+            }
+        }
+        None
+    }
+
+    /// Checks for a preceding BETWEEN operator at the same depth (for AND disambiguation).
+    pub fn has_preceding_between_operator(&self, arena: &[Node]) -> bool {
+        let my_depth = self.depth();
+        let mut idx = self.previous_node;
+        while let Some(i) = idx {
+            let node = &arena[i];
+            if node.depth() < my_depth {
+                break;
+            }
+            if node.depth() == my_depth {
+                if node.token.token_type == TokenType::WordOperator
+                    && node.value.eq_ignore_ascii_case("between")
+                {
+                    return true;
+                }
+                if node.is_boolean_operator() {
+                    break;
+                }
+            }
+            idx = node.previous_node;
+        }
+        false
+    }
+
+    /// True if this is the AND that follows a BETWEEN (i.e., BETWEEN x AND y).
+    pub fn is_the_and_after_between(&self, arena: &[Node]) -> bool {
+        self.is_boolean_operator()
+            && self.value.eq_ignore_ascii_case("and")
+            && self.has_preceding_between_operator(arena)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token::Token;
+
+    fn make_node(token_type: TokenType, value: &str, prev: Option<NodeIndex>) -> Node {
+        Node::new(
+            Token::new(token_type, "", value, 0, value.len()),
+            prev,
+            String::new(),
+            value.to_string(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn test_depth_empty() {
+        let node = make_node(TokenType::Name, "foo", None);
+        assert_eq!(node.depth(), (0, 0));
+    }
+
+    #[test]
+    fn test_depth_with_brackets() {
+        let mut node = make_node(TokenType::Name, "foo", None);
+        node.open_brackets = vec![0, 1];
+        node.open_jinja_blocks = vec![2];
+        assert_eq!(node.depth(), (2, 1));
+    }
+
+    #[test]
+    fn test_formatted_string() {
+        let mut node = make_node(TokenType::Name, "foo", None);
+        node.prefix = " ".to_string();
+        assert_eq!(node.to_formatted_string(), " foo");
+        assert_eq!(node.len(), 4);
+    }
+
+    #[test]
+    fn test_is_multiplication_star() {
+        // Star after a name => multiplication
+        let mut arena = Vec::new();
+        arena.push(make_node(TokenType::Name, "a", None));
+        let mut star = make_node(TokenType::Star, "*", Some(0));
+        star.token = Token::new(TokenType::Star, "", "*", 2, 3);
+        assert!(star.is_multiplication_star(&arena));
+
+        // Star after SELECT => not multiplication
+        let mut arena2 = Vec::new();
+        arena2.push(make_node(TokenType::UntermKeyword, "select", None));
+        let star2 = make_node(TokenType::Star, "*", Some(0));
+        assert!(!star2.is_multiplication_star(&arena2));
+    }
+
+    #[test]
+    fn test_get_previous_sql_token_skips_newline() {
+        let mut arena = Vec::new();
+        arena.push(make_node(TokenType::Name, "a", None));
+        arena.push(make_node(TokenType::Newline, "\n", Some(0)));
+        let node = make_node(TokenType::Name, "b", Some(1));
+        let prev = node.get_previous_sql_token(&arena);
+        assert!(prev.is_some());
+        assert_eq!(prev.unwrap().token, "a");
+    }
+}

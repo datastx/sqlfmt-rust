@@ -1,0 +1,394 @@
+/// Core lexing rules. These define the base rule set that all dialects extend.
+/// Priority ordering: lower numbers match first.
+///
+/// Rule categories and priority ranges:
+///   0-1:     fmt:off / fmt:on
+///   100-120: Jinja start markers
+///   200:     Quoted names / strings
+///   299-320: Comments, PG operators
+///   350:     Semicolons
+///   400-450: Numbers, stars, operators, punctuation
+///   500-510: Brackets
+///   600:     Other identifiers
+///   790-800: Angle brackets, operators
+///   5000:    Fallback name
+///   9000:    Newline
+use crate::action::Action;
+use crate::rule::Rule;
+use crate::token::TokenType;
+
+/// Build the ALWAYS rules — applied in every context.
+pub fn always_rules() -> Vec<Rule> {
+    vec![
+        // fmt: off
+        Rule::new(
+            "fmt_off",
+            0,
+            r"((--|#)\s*fmt:\s*off\s*)",
+            Action::AddNode {
+                token_type: TokenType::FmtOff,
+            },
+        ),
+        // fmt: on
+        Rule::new(
+            "fmt_on",
+            1,
+            r"((--|#)\s*fmt:\s*on\s*)",
+            Action::AddNode {
+                token_type: TokenType::FmtOn,
+            },
+        ),
+        // Jinja comment: {# ... #}
+        Rule::new(
+            "jinja_comment",
+            110,
+            r"(\{#[\s\S]*?#\})",
+            Action::AddComment,
+        ),
+        // Jinja expression: {{ ... }}
+        Rule::new(
+            "jinja_expression",
+            115,
+            r"(\{\{-?[\s\S]*?-?\}\})",
+            Action::HandleJinja {
+                token_type: TokenType::JinjaExpression,
+            },
+        ),
+        // Jinja statement: {% ... %}
+        Rule::new(
+            "jinja_statement",
+            120,
+            r"(\{%-?[\s\S]*?-?%\})",
+            Action::HandleJinja {
+                token_type: TokenType::JinjaStatement,
+            },
+        ),
+        // Single-quoted string
+        Rule::new(
+            "single_quoted_string",
+            200,
+            r"('(?:[^'\\]|\\.)*')",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Double-quoted name
+        Rule::new(
+            "double_quoted_name",
+            201,
+            r#"("(?:[^"\\]|\\.)*")"#,
+            Action::AddNode {
+                token_type: TokenType::QuotedName,
+            },
+        ),
+        // Backtick-quoted name
+        Rule::new(
+            "backtick_quoted_name",
+            202,
+            r"(`(?:[^`\\]|\\.)*`)",
+            Action::AddNode {
+                token_type: TokenType::QuotedName,
+            },
+        ),
+        // Dollar-quoted string (PostgreSQL)
+        Rule::new(
+            "dollar_quoted_string",
+            205,
+            r"(\$[a-zA-Z_]*\$[\s\S]*?\$[a-zA-Z_]*\$)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Line comment: -- or // (but not fmt:off/on)
+        Rule::new(
+            "line_comment",
+            300,
+            r"(--[^\n]*|//[^\n]*)",
+            Action::AddComment,
+        ),
+        // Block comment start: /*
+        Rule::new(
+            "block_comment",
+            310,
+            r"(/\*[\s\S]*?\*/)",
+            Action::AddComment,
+        ),
+        // Semicolon
+        Rule::new(
+            "semicolon",
+            350,
+            r"(;)",
+            Action::HandleSemicolon,
+        ),
+        // Newline
+        Rule::new(
+            "newline",
+            9000,
+            r"(\n)",
+            Action::HandleNewline,
+        ),
+    ]
+}
+
+/// Build the CORE rules — applied in standard SQL contexts.
+/// Extends ALWAYS rules.
+pub fn core_rules() -> Vec<Rule> {
+    let mut rules = always_rules();
+
+    rules.extend(vec![
+        // PostgreSQL hash operators: #>>, #>, #-, #
+        Rule::new(
+            "pg_operator",
+            299,
+            r"(#>>|#>|#-|#)",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Hex literals: 0x...
+        Rule::new(
+            "hex_literal",
+            399,
+            r"(0[xX][0-9a-fA-F]+)\b",
+            Action::HandleNumber,
+        ),
+        // Scientific notation numbers
+        Rule::new(
+            "scientific_number",
+            400,
+            r"(\d[\d_]*(?:\.[\d_]*)?[eE][+-]?\d[\d_]*)\b",
+            Action::HandleNumber,
+        ),
+        // Decimal numbers
+        Rule::new(
+            "decimal_number",
+            401,
+            r"(\d[\d_]*\.[\d_]*)\b",
+            Action::HandleNumber,
+        ),
+        // Integer numbers
+        Rule::new(
+            "integer_number",
+            402,
+            r"(\d[\d_]*)\b",
+            Action::HandleNumber,
+        ),
+        // Star (SELECT *, multiplication, etc.)
+        Rule::new(
+            "star",
+            410,
+            r"(\*)",
+            Action::AddNode {
+                token_type: TokenType::Star,
+            },
+        ),
+        // Double colon (PostgreSQL cast)
+        Rule::new(
+            "double_colon",
+            420,
+            r"(::)",
+            Action::AddNode {
+                token_type: TokenType::DoublColon,
+            },
+        ),
+        // Walrus operator :=
+        Rule::new(
+            "walrus",
+            421,
+            r"(:=)",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Colon (single : only — :: is matched by double_colon at priority 420,
+        // walrus := at priority 421, so this only matches lone colons)
+        Rule::new(
+            "colon",
+            430,
+            r"(:)",
+            Action::AddNode {
+                token_type: TokenType::Colon,
+            },
+        ),
+        // Comma
+        Rule::new(
+            "comma",
+            440,
+            r"(,)",
+            Action::AddNode {
+                token_type: TokenType::Comma,
+            },
+        ),
+        // Dot
+        Rule::new(
+            "dot",
+            450,
+            r"(\.)",
+            Action::AddNode {
+                token_type: TokenType::Dot,
+            },
+        ),
+        // Opening brackets: (, [, ARRAY<, STRUCT<, ARRAY(, etc.
+        Rule::new(
+            "bracket_open",
+            500,
+            r"(\(|\[)",
+            Action::AddNode {
+                token_type: TokenType::BracketOpen,
+            },
+        ),
+        // Closing brackets: ), ]
+        Rule::new(
+            "bracket_close",
+            510,
+            r"(\)|\])",
+            Action::AddNode {
+                token_type: TokenType::BracketClose,
+            },
+        ),
+        // Angle bracket: array<, struct<, map<
+        Rule::new(
+            "angle_bracket_open",
+            505,
+            r"(array|struct|map)\s*(<)",
+            Action::SafeAddNode {
+                token_type: TokenType::BracketOpen,
+                alt_token_type: TokenType::Name,
+            },
+        ),
+        // Other identifiers: @variable, $1, $variable
+        Rule::new(
+            "at_identifier",
+            600,
+            r"(@\w+)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        Rule::new(
+            "dollar_identifier",
+            601,
+            r"(\$\w+)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Multi-char operators starting with > or < (must come before angle_bracket_close)
+        Rule::new(
+            "compound_operator",
+            785,
+            r"(>=|>>|<>|<=|<=>|!=|<<|->|->>|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*)",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Closing angle bracket: > (needs special handling - could be bracket or operator)
+        Rule::new(
+            "angle_bracket_close",
+            790,
+            r"(>)",
+            Action::HandleClosingAngleBracket,
+        ),
+        // Operators (single-char and remaining multi-char)
+        Rule::new(
+            "operator",
+            800,
+            r"(~|[+\-/%&|^])",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Comparison: < (only if not already consumed by angle bracket rules)
+        Rule::new(
+            "less_than",
+            801,
+            r"(<)",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Equals sign
+        Rule::new(
+            "equals",
+            802,
+            r"(=)",
+            Action::AddNode {
+                token_type: TokenType::Operator,
+            },
+        ),
+        // Fallback: any identifier
+        Rule::new(
+            "name",
+            5000,
+            r"(\w+)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Note: Non-newline whitespace is captured by group 1 of every rule's
+        // pattern prefix `([^\S\n]*)`, so no explicit whitespace rule is needed.
+    ]);
+
+    rules
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_always_rules_created() {
+        let rules = always_rules();
+        assert!(!rules.is_empty());
+        // Should have fmt_off, fmt_on, jinja, strings, comments, semicolon, newline
+        assert!(rules.iter().any(|r| r.name == "fmt_off"));
+        assert!(rules.iter().any(|r| r.name == "newline"));
+    }
+
+    #[test]
+    fn test_core_rules_created() {
+        let rules = core_rules();
+        assert!(rules.len() > 20);
+        assert!(rules.iter().any(|r| r.name == "star"));
+        assert!(rules.iter().any(|r| r.name == "comma"));
+        assert!(rules.iter().any(|r| r.name == "bracket_open"));
+        assert!(rules.iter().any(|r| r.name == "name"));
+    }
+
+    #[test]
+    fn test_rule_priority_ordering() {
+        let mut rules = core_rules();
+        rules.sort_by_key(|r| r.priority);
+        // Verify fmt_off has lowest priority
+        assert_eq!(rules[0].name, "fmt_off");
+    }
+
+    #[test]
+    fn test_number_patterns() {
+        let rules = core_rules();
+        let hex_rule = rules.iter().find(|r| r.name == "hex_literal").unwrap();
+        assert!(hex_rule.pattern.is_match("0xFF"));
+        assert!(hex_rule.pattern.is_match("0x1A2B"));
+
+        let int_rule = rules.iter().find(|r| r.name == "integer_number").unwrap();
+        assert!(int_rule.pattern.is_match("42"));
+        assert!(int_rule.pattern.is_match("1_000"));
+    }
+
+    #[test]
+    fn test_string_patterns() {
+        let rules = core_rules();
+        let sq = rules
+            .iter()
+            .find(|r| r.name == "single_quoted_string")
+            .unwrap();
+        assert!(sq.pattern.is_match("'hello'"));
+        assert!(sq.pattern.is_match("'it\\'s'"));
+
+        let dq = rules
+            .iter()
+            .find(|r| r.name == "double_quoted_name")
+            .unwrap();
+        assert!(dq.pattern.is_match("\"my_table\""));
+    }
+}
