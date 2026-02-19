@@ -1,6 +1,6 @@
 use crate::comment::Comment;
 use crate::node::{Node, NodeIndex};
-use crate::token::Token;
+use crate::token::{Token, TokenType};
 
 /// A Line is a collection of Nodes intended to be printed on one line,
 /// plus any attached comments.
@@ -58,15 +58,17 @@ impl Line {
             return "\n".to_string();
         }
         let mut result = String::new();
-        for (i, &idx) in self.nodes.iter().enumerate() {
+        let mut first_content = true;
+        for &idx in &self.nodes {
             let node = &arena[idx];
             if node.is_newline() {
                 continue;
             }
-            if i == 0 || (i == 1 && arena[self.nodes[0]].is_newline()) {
+            if first_content {
                 // First content node: use indentation instead of prefix
                 result.push_str(&self.indentation(arena));
                 result.push_str(&node.value);
+                first_content = false;
             } else {
                 result.push_str(&node.to_formatted_string());
             }
@@ -223,7 +225,80 @@ impl Line {
             .unwrap_or(false)
     }
 
-    /// True if this line marks the start of a new segment.
+    /// True if this line has only one non-newline content node.
+    pub fn is_standalone_content(&self, arena: &[Node]) -> bool {
+        let content_count = self
+            .nodes
+            .iter()
+            .filter(|&&i| !arena[i].is_newline())
+            .count();
+        content_count == 1
+    }
+
+    /// True if this line is a standalone operator (single operator + optional newline).
+    pub fn is_standalone_operator(&self, arena: &[Node]) -> bool {
+        self.starts_with_operator(arena)
+            && !self.starts_with_bracket_operator(arena)
+            && self.is_standalone_content(arena)
+    }
+
+    /// True if this line is a standalone comma.
+    pub fn is_standalone_comma(&self, arena: &[Node]) -> bool {
+        self.starts_with_comma(arena) && self.is_standalone_content(arena)
+    }
+
+    /// True if first node is a bracket operator.
+    pub fn starts_with_bracket_operator(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_bracket_operator(arena))
+            .unwrap_or(false)
+    }
+
+    /// Check if the token preceding this line (via previous_node) is a comma.
+    pub fn previous_token_is_comma(&self, arena: &[Node]) -> bool {
+        if let Some(prev_idx) = self.previous_node {
+            let mut idx = Some(prev_idx);
+            while let Some(i) = idx {
+                let node = &arena[i];
+                if node.token.token_type.does_not_set_prev_sql_context() {
+                    idx = node.previous_node;
+                } else {
+                    return node.token.token_type == TokenType::Comma;
+                }
+            }
+        }
+        false
+    }
+
+    /// True if this closes a simple jinja block from a previous line.
+    pub fn closes_simple_jinja_block(&self, arena: &[Node]) -> bool {
+        self.first_content_node(arena)
+            .map(|n| n.is_closing_jinja_block())
+            .unwrap_or(false)
+    }
+
+    /// True if this line marks the start of a new segment relative to prev_segment_depth.
+    /// Mirrors Python's `starts_new_segment(prev_segment_depth)`.
+    pub fn starts_new_segment_at_depth(
+        &self,
+        prev_segment_depth: (usize, usize),
+        arena: &[Node],
+    ) -> bool {
+        let depth = self.depth(arena);
+        if depth <= prev_segment_depth || depth.1 < prev_segment_depth.1 {
+            if (self.closes_bracket_from_previous_line(arena)
+                || self.closes_simple_jinja_block(arena)
+                || self.is_blank_line(arena))
+                && depth == prev_segment_depth
+            {
+                return false;
+            }
+            return true;
+        }
+        false
+    }
+
+    /// True if this line marks the start of a new segment (simple version).
     pub fn starts_new_segment(&self, arena: &[Node]) -> bool {
         if self.is_blank_line(arena) {
             return self.depth(arena) == (0, 0);

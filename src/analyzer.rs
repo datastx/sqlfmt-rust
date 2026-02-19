@@ -305,17 +305,18 @@ impl Analyzer {
 
         let mut line = Line::new(prev);
 
-        // Add a newline node at the start
-        let nl_token = Token::new(TokenType::Newline, "", "\n", self.pos, self.pos + 1);
-        let nl_node = self.node_manager.create_node(nl_token, self.previous_node_index(), &self.arena);
-        let nl_idx = self.arena.len();
-        self.arena.push(nl_node);
-        line.append_node(nl_idx);
-
         // Add all buffered nodes
         for &idx in &self.node_buffer {
             line.append_node(idx);
         }
+
+        // Add a newline node at the END (mirrors Python behavior)
+        let nl_prev = self.node_buffer.last().copied().or_else(|| self.previous_node_index());
+        let nl_token = Token::new(TokenType::Newline, "", "\n", self.pos, self.pos + 1);
+        let nl_node = self.node_manager.create_node(nl_token, nl_prev, &self.arena);
+        let nl_idx = self.arena.len();
+        self.arena.push(nl_node);
+        line.append_node(nl_idx);
 
         // Add all buffered comments
         for comment in self.comment_buffer.drain(..) {

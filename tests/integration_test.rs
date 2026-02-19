@@ -1,16 +1,12 @@
 use sqlfmt::{format_string, Mode};
 
 fn default_mode() -> Mode {
-    Mode {
-        fast: true, // Skip safety check for integration tests during development
-        ..Mode::default()
-    }
+    Mode::default()
 }
 
 fn duckdb_mode() -> Mode {
     Mode {
         dialect_name: "duckdb".to_string(),
-        fast: true,
         ..Mode::default()
     }
 }

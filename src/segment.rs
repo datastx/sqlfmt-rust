@@ -34,11 +34,12 @@ impl Segment {
         ))
     }
 
-    /// Last non-blank line and its index.
+    /// Last non-blank line and its index (from the bottom).
     pub fn tail(&self, arena: &[Node]) -> Result<(usize, &Line), SqlfmtError> {
         for (i, line) in self.lines.iter().enumerate().rev() {
             if !line.is_blank_line(arena) {
-                return Ok((i, line));
+                let from_bottom = self.lines.len() - 1 - i;
+                return Ok((from_bottom, line));
             }
         }
         Err(SqlfmtError::Segment(
@@ -46,47 +47,110 @@ impl Segment {
         ))
     }
 
-    /// True if the tail line closes a bracket opened by the head line.
+    /// True if the tail line closes a bracket or simple jinja block
+    /// opened by the head line.
     pub fn tail_closes_head(&self, arena: &[Node]) -> bool {
-        let head = match self.head(arena) {
-            Ok((_, h)) => h,
+        if self.lines.len() <= 1 {
+            return false;
+        }
+
+        let (head_idx, head) = match self.head(arena) {
+            Ok(h) => h,
             Err(_) => return false,
         };
-        let tail = match self.tail(arena) {
-            Ok((_, t)) => t,
+        let (tail_from_bottom, tail) = match self.tail(arena) {
+            Ok(t) => t,
             Err(_) => return false,
         };
 
-        head.ends_with_opening_bracket(arena) && tail.closes_bracket_from_previous_line(arena)
+        let tail_idx = self.lines.len() - 1 - tail_from_bottom;
+        if head_idx == tail_idx {
+            return false;
+        }
+
+        let head_depth = head.depth(arena);
+        let tail_depth = tail.depth(arena);
+
+        if tail_depth != head_depth {
+            return false;
+        }
+
+        let between = &self.lines[head_idx + 1..tail_idx];
+
+        // Bracket closing
+        if tail.closes_bracket_from_previous_line(arena)
+            && between.iter().all(|l| l.depth(arena).0 > head_depth.0)
+        {
+            return true;
+        }
+
+        // Jinja block closing
+        if tail.closes_simple_jinja_block(arena)
+            && between.iter().all(|l| l.depth(arena).1 > head_depth.1)
+        {
+            return true;
+        }
+
+        false
     }
 
-    /// Split the segment at the given line index: lines[..=idx] and lines[idx+1..].
-    pub fn split_after(&self, idx: usize) -> (Segment, Segment) {
-        let left = Segment::new(self.lines[..=idx].to_vec());
-        let right = Segment::new(self.lines[idx + 1..].to_vec());
-        (left, right)
+    /// Split the segment after the given line index.
+    pub fn split_after(&self, idx: usize, arena: &[Node]) -> Vec<Segment> {
+        if self.tail_closes_head(arena) {
+            let (tail_from_bottom, _) = match self.tail(arena) {
+                Ok(t) => t,
+                Err(_) => return vec![Segment::new(self.lines[idx + 1..].to_vec())],
+            };
+            let tail_start = self.lines.len() - 1 - tail_from_bottom;
+            if idx + 1 < tail_start {
+                vec![
+                    Segment::new(self.lines[idx + 1..tail_start].to_vec()),
+                    Segment::new(self.lines[tail_start..].to_vec()),
+                ]
+            } else {
+                vec![Segment::new(self.lines[idx + 1..].to_vec())]
+            }
+        } else {
+            vec![Segment::new(self.lines[idx + 1..].to_vec())]
+        }
     }
 }
 
 /// Build segments from a flat list of lines.
-/// A new segment starts when `line.starts_new_segment()` is true.
+/// Mirrors Python's `create_segments_from_lines`:
+/// A segment is a list of consecutive lines that are indented from the first line.
 pub fn build_segments(lines: &[Line], arena: &[Node]) -> Vec<Segment> {
     if lines.is_empty() {
         return Vec::new();
     }
 
     let mut segments: Vec<Segment> = Vec::new();
-    let mut current_lines: Vec<Line> = Vec::new();
+    let mut j = 0;
 
-    for line in lines {
-        if !current_lines.is_empty() && line.starts_new_segment(arena) {
-            segments.push(Segment::new(std::mem::take(&mut current_lines)));
+    while j < lines.len() {
+        let target_depth = lines[j].depth(arena);
+
+        // Determine start index for scanning
+        let start_idx = if lines[j].is_standalone_operator(arena) {
+            j + 2
+        } else {
+            j + 1
+        };
+
+        let mut found = false;
+        for i in start_idx..lines.len() {
+            if lines[i].starts_new_segment_at_depth(target_depth, arena) {
+                segments.push(Segment::new(lines[j..i].to_vec()));
+                j = i;
+                found = true;
+                break;
+            }
         }
-        current_lines.push(line.clone());
-    }
 
-    if !current_lines.is_empty() {
-        segments.push(Segment::new(current_lines));
+        if !found {
+            segments.push(Segment::new(lines[j..].to_vec()));
+            break;
+        }
     }
 
     segments
@@ -128,21 +192,18 @@ mod tests {
 
         let seg = Segment::new(vec![line1, line2]);
         let (head_idx, _) = seg.head(&arena).unwrap();
-        let (tail_idx, _) = seg.tail(&arena).unwrap();
+        let (tail_from_bottom, _) = seg.tail(&arena).unwrap();
         assert_eq!(head_idx, 0);
-        assert_eq!(tail_idx, 1);
+        assert_eq!(tail_from_bottom, 0);
     }
 
     #[test]
-    fn test_segment_split_after() {
+    fn test_build_segments() {
         let mut arena = Vec::new();
         let line1 = make_line(&mut arena, TokenType::Name, "a");
         let line2 = make_line(&mut arena, TokenType::Name, "b");
-        let line3 = make_line(&mut arena, TokenType::Name, "c");
 
-        let seg = Segment::new(vec![line1, line2, line3]);
-        let (left, right) = seg.split_after(0);
-        assert_eq!(left.len(), 1);
-        assert_eq!(right.len(), 2);
+        let segments = build_segments(&[line1, line2], &arena);
+        assert!(!segments.is_empty());
     }
 }

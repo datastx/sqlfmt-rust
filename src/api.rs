@@ -186,28 +186,29 @@ fn collect_sql_files(
 
 /// Perform safety equivalence check: re-lex the formatted output
 /// and verify tokens match the original.
+/// Mirrors Python's safety check which compares Token objects
+/// (type and raw token text, not values which may have been lowercased).
 fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), SqlfmtError> {
-    // Re-lex the formatted output
-    let dialect = mode.dialect().map_err(|e| SqlfmtError::Config(e))?;
+    use crate::token::TokenType;
+
+    let dialect = mode.dialect().map_err(SqlfmtError::Config)?;
     let mut analyzer1 = dialect.initialize_analyzer(mode.line_length);
     let mut analyzer2 = dialect.initialize_analyzer(mode.line_length);
 
     let query1 = analyzer1.parse_query(original)?;
     let query2 = analyzer2.parse_query(formatted)?;
 
-    // Compare non-whitespace tokens
+    // Collect tokens, skipping whitespace-only tokens (Newline)
     let tokens1: Vec<_> = query1
         .tokens(&analyzer1.arena)
         .into_iter()
-        .filter(|n| !n.is_newline())
-        .map(|n| (&n.token.token_type, &n.value))
+        .filter(|n| n.token.token_type != TokenType::Newline)
         .collect();
 
     let tokens2: Vec<_> = query2
         .tokens(&analyzer2.arena)
         .into_iter()
-        .filter(|n| !n.is_newline())
-        .map(|n| (&n.token.token_type, &n.value))
+        .filter(|n| n.token.token_type != TokenType::Newline)
         .collect();
 
     if tokens1.len() != tokens2.len() {
@@ -218,11 +219,24 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
         )));
     }
 
-    for (i, (t1, t2)) in tokens1.iter().zip(tokens2.iter()).enumerate() {
-        if t1 != t2 {
+    for (i, (n1, n2)) in tokens1.iter().zip(tokens2.iter()).enumerate() {
+        // Compare token type
+        if n1.token.token_type != n2.token.token_type {
             return Err(SqlfmtError::Equivalence(format!(
-                "Token mismatch at position {}: original {:?}, formatted {:?}",
-                i, t1, t2
+                "Token type mismatch at position {}: original {:?} '{}', formatted {:?} '{}'",
+                i, n1.token.token_type, n1.token.token, n2.token.token_type, n2.token.token
+            )));
+        }
+        // Compare token text (case-insensitive for keywords)
+        let t1 = n1.token.token.to_lowercase();
+        let t2 = n2.token.token.to_lowercase();
+        // Normalize whitespace for multi-word tokens
+        let t1_norm: String = t1.split_whitespace().collect::<Vec<_>>().join(" ");
+        let t2_norm: String = t2.split_whitespace().collect::<Vec<_>>().join(" ");
+        if t1_norm != t2_norm {
+            return Err(SqlfmtError::Equivalence(format!(
+                "Token text mismatch at position {}: original '{}', formatted '{}'",
+                i, n1.token.token, n2.token.token
             )));
         }
     }

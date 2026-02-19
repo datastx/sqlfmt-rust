@@ -1,154 +1,268 @@
+use crate::comment::Comment;
 use crate::line::Line;
 use crate::node::{Node, NodeIndex};
-use crate::token::TokenType;
+use crate::token::{Token, TokenType};
 
-/// LineSplitter breaks long lines at keywords, operators, brackets, and commas.
+/// LineSplitter breaks lines at keywords, operators, brackets, and commas.
 /// This is Stage 1 of the formatting pipeline.
+///
+/// Mirrors the Python sqlfmt LineSplitter exactly:
+/// - Iterates node-by-node with split_before/split_after flags
+/// - Splits AFTER commas, opening brackets, keywords, query dividers
+/// - Splits BEFORE operators, keywords, closing brackets, multiline jinja
+/// - Uses iterative (not recursive) approach to handle very long lines
 pub struct LineSplitter {
-    max_length: usize,
+    _max_length: usize,
 }
 
 impl LineSplitter {
     pub fn new(max_length: usize) -> Self {
-        Self { max_length }
+        Self {
+            _max_length: max_length,
+        }
     }
 
-    /// Split a single line if it exceeds the max length.
-    /// Returns the original line if no split is needed.
-    pub fn maybe_split(&self, line: &Line, arena: &[Node]) -> Vec<Line> {
-        // Don't split blank lines or lines with formatting disabled
-        if line.is_blank_line(arena) || line.has_formatting_disabled() {
+    /// Split a single line into multiple lines based on SQL structure.
+    /// This always splits — it does not check line length first.
+    /// The Python splitter also always splits (length checking is done by the merger).
+    pub fn maybe_split(&self, line: &Line, arena: &mut Vec<Node>) -> Vec<Line> {
+        if line.has_formatting_disabled() {
             return vec![line.clone()];
         }
 
-        // Don't split if line fits
-        if line.len(arena) <= self.max_length {
-            return vec![line.clone()];
-        }
+        let mut new_lines: Vec<Line> = Vec::new();
+        let mut comments = line.comments.clone();
+        let mut head: usize = 0;
+        let mut always_split_after = false;
+        let mut never_split_after = false;
 
-        // Try to find split points
-        let split_result = self.find_and_apply_splits(line, arena);
-        if split_result.len() > 1 {
-            // Recursively split any still-too-long lines (up to a limit)
-            let mut final_lines = Vec::new();
-            for l in split_result {
-                if l.len(arena) > self.max_length && l.nodes.len() > 2 {
-                    final_lines.extend(self.maybe_split(&l, arena));
+        for i in 0..line.nodes.len() {
+            let node_idx = line.nodes[i];
+            let node = &arena[node_idx];
+
+            if node.is_newline() {
+                if head == 0 {
+                    new_lines.push(line.clone());
                 } else {
-                    final_lines.push(l);
+                    let (new_line, _remaining_comments) =
+                        self.split_at_index(line, head, i, &comments, true, arena);
+                    new_lines.push(new_line);
+                }
+                return new_lines;
+            } else if i > head
+                && !never_split_after
+                && !Self::node_has_formatting_disabled(node_idx, arena)
+                && (always_split_after || self.maybe_split_before(node_idx, arena))
+            {
+                let (new_line, remaining_comments) =
+                    self.split_at_index(line, head, i, &comments, false, arena);
+                comments = remaining_comments;
+                new_lines.push(new_line);
+                head = i;
+            }
+
+            let (split_after, no_split_after) = self.maybe_split_after(node_idx, arena);
+            always_split_after = split_after;
+            never_split_after = no_split_after;
+        }
+
+        // Handle remaining nodes (no newline at end)
+        let (new_line, _remaining_comments) =
+            self.split_at_index(line, head, line.nodes.len(), &comments, true, arena);
+        new_lines.push(new_line);
+        new_lines
+    }
+
+    /// Return true if we should split before this node.
+    fn maybe_split_before(&self, node_idx: NodeIndex, arena: &[Node]) -> bool {
+        let node = &arena[node_idx];
+
+        // Split before multiline jinja
+        if node.is_multiline_jinja() {
+            return true;
+        }
+        // Split before any unterm keyword
+        if node.is_unterm_keyword() {
+            return true;
+        }
+        // Split before any opening jinja block
+        if node.is_opening_jinja_block() {
+            return true;
+        }
+        // Split before operators
+        if node.is_operator(arena) {
+            return true;
+        }
+        // Split before closing brackets
+        if node.is_closing_bracket() {
+            return true;
+        }
+        // Split before closing jinja blocks
+        if node.is_closing_jinja_block() {
+            return true;
+        }
+        // Split before query dividers (semicolon, set operators)
+        if node.divides_queries() {
+            return true;
+        }
+        // Split if opening bracket follows closing bracket
+        // (e.g., split(my_field)[offset(1)])
+        if self.maybe_split_between_brackets(node_idx, arena) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Return true if this is an open bracket that follows a closing bracket.
+    fn maybe_split_between_brackets(&self, node_idx: NodeIndex, arena: &[Node]) -> bool {
+        let node = &arena[node_idx];
+        if !node.is_opening_bracket() {
+            return false;
+        }
+        if let Some(prev_idx) = node.previous_node {
+            // Walk back past newlines/jinja to find prev SQL token
+            let prev = &arena[prev_idx];
+            if prev.is_closing_bracket() {
+                return true;
+            }
+            // Also check via get_previous_sql_token
+            if let Some(prev_token) = node.get_previous_sql_token(arena) {
+                if prev_token.token_type.is_closing_bracket() {
+                    return true;
                 }
             }
-            final_lines
+        }
+        false
+    }
+
+    /// Return (always_split_after, never_split_after).
+    fn maybe_split_after(&self, node_idx: NodeIndex, arena: &[Node]) -> (bool, bool) {
+        let node = &arena[node_idx];
+
+        // Always split after commas
+        if node.is_comma() {
+            return (true, false);
+        }
+        // Always split after opening brackets
+        if node.is_opening_bracket() {
+            return (true, false);
+        }
+        // Always split after opening jinja blocks
+        if node.is_opening_jinja_block() {
+            return (true, false);
+        }
+        // Always split after unterm keywords
+        if node.is_unterm_keyword() {
+            return (true, false);
+        }
+        // Always split after query dividers
+        if node.divides_queries() {
+            return (true, false);
+        }
+        // Never split after formatting-disabled nodes
+        if !node.formatting_disabled.is_empty() {
+            return (false, true);
+        }
+
+        (false, false)
+    }
+
+    /// Split a line at the given index. Returns the new head line and remaining comments.
+    fn split_at_index(
+        &self,
+        line: &Line,
+        head: usize,
+        index: usize,
+        comments: &[Comment],
+        no_tail: bool,
+        arena: &mut Vec<Node>,
+    ) -> (Line, Vec<Comment>) {
+        let new_nodes: Vec<NodeIndex> = if index >= line.nodes.len() {
+            line.nodes[head..].to_vec()
         } else {
-            split_result
-        }
-    }
+            line.nodes[head..index].to_vec()
+        };
 
-    /// Find the best split point and create two lines.
-    fn find_and_apply_splits(&self, line: &Line, arena: &[Node]) -> Vec<Line> {
-        let content_nodes: Vec<(usize, NodeIndex)> = line
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, &idx)| !arena[idx].is_newline())
-            .map(|(i, &idx)| (i, idx))
-            .collect();
-
-        if content_nodes.len() <= 1 {
-            return vec![line.clone()];
+        if new_nodes.is_empty() {
+            // Shouldn't happen, but return empty line
+            let empty_line = Line::new(line.previous_node);
+            return (empty_line, comments.to_vec());
         }
 
-        // Find the best split point (highest priority)
-        let mut best_split: Option<(usize, SplitPriority)> = None;
-
-        for (pos, (line_pos, node_idx)) in content_nodes.iter().enumerate() {
-            if pos == 0 {
-                continue; // Don't split before the first node
-            }
-
-            let node = &arena[*node_idx];
-            let priority = self.split_priority(node, arena);
-
-            if let Some(priority) = priority {
-                match &best_split {
-                    None => {
-                        best_split = Some((*line_pos, priority));
-                    }
-                    Some((_, best_prio)) => {
-                        // Higher priority wins; for equal priority, prefer later split
-                        if priority >= *best_prio {
-                            best_split = Some((*line_pos, priority));
-                        }
-                    }
-                }
-            }
-        }
-
-        match best_split {
-            Some((split_pos, _)) => self.split_at(line, split_pos, arena),
-            None => vec![line.clone()],
-        }
-    }
-
-    /// Determine the split priority for splitting *before* this node.
-    fn split_priority(&self, node: &Node, arena: &[Node]) -> Option<SplitPriority> {
-        let tt = node.token.token_type;
-        match tt {
-            // Highest priority: split before keywords
-            TokenType::UntermKeyword => Some(SplitPriority::Keyword),
-            // Split before boolean operators (AND, OR)
-            TokenType::BooleanOperator => {
-                if node.is_the_and_after_between(arena) {
-                    None // Don't split BETWEEN x AND y
+        // Determine comment distribution
+        let (head_comments, tail_comments) = if no_tail {
+            (comments.to_vec(), Vec::new())
+        } else if comments.is_empty() {
+            (Vec::new(), Vec::new())
+        } else if new_nodes.len() == 1
+            && arena[new_nodes[0]].token.token_type == TokenType::Comma
+        {
+            // If head is just a comma, pass all comments to tail
+            (Vec::new(), comments.to_vec())
+        } else {
+            let mut head_c = Vec::new();
+            let mut tail_c = Vec::new();
+            for comment in comments {
+                if comment.is_standalone || comment.is_multiline() {
+                    head_c.push(comment.clone());
+                } else if comment.is_inline() {
+                    tail_c.push(comment.clone());
                 } else {
-                    Some(SplitPriority::BooleanOperator)
+                    tail_c.push(comment.clone());
                 }
             }
-            // Split before ON
-            TokenType::On => Some(SplitPriority::On),
-            // Split before word operators
-            TokenType::WordOperator => Some(SplitPriority::WordOperator),
-            // Split before regular operators
-            TokenType::Operator | TokenType::DoublColon => Some(SplitPriority::Operator),
-            // Split before commas
-            TokenType::Comma => Some(SplitPriority::Comma),
-            // Split after opening bracket (split before next node)
-            _ => None,
+            (head_c, tail_c)
+        };
+
+        // Build the new line
+        let prev = if !new_nodes.is_empty() {
+            arena[new_nodes[0]].previous_node
+        } else {
+            line.previous_node
+        };
+        let mut new_line = Line::new(prev);
+        for &idx in &new_nodes {
+            new_line.append_node(idx);
         }
+        new_line.comments = head_comments;
+
+        // Ensure line ends with a newline node
+        if !new_nodes.is_empty() && !arena[*new_nodes.last().unwrap()].is_newline() {
+            self.append_newline(&mut new_line, arena);
+        }
+
+        (new_line, tail_comments)
     }
 
-    /// Split a line at the given position (by line.nodes index).
-    fn split_at(&self, line: &Line, split_pos: usize, _arena: &[Node]) -> Vec<Line> {
-        let mut first_line = Line::new(line.previous_node);
-        let mut second_line = Line::new(line.previous_node);
-
-        for (i, &node_idx) in line.nodes.iter().enumerate() {
-            if i < split_pos {
-                first_line.append_node(node_idx);
-            } else {
-                second_line.append_node(node_idx);
-            }
-        }
-
-        // Comments stay with the first line for now
-        first_line.comments = line.comments.clone();
-
-        if first_line.nodes.is_empty() || second_line.nodes.is_empty() {
-            return vec![line.clone()];
-        }
-
-        vec![first_line, second_line]
+    /// Append a newline node to the end of a line.
+    fn append_newline(&self, line: &mut Line, arena: &mut Vec<Node>) {
+        let prev_idx = line.nodes.last().copied();
+        let spos = prev_idx
+            .map(|i| arena[i].token.epos)
+            .unwrap_or(0);
+        let nl_token = Token::new(TokenType::Newline, "", "\n", spos, spos);
+        let nl_node = Node::new(
+            nl_token,
+            prev_idx,
+            String::new(),
+            "\n".to_string(),
+            prev_idx
+                .map(|i| arena[i].open_brackets.clone())
+                .unwrap_or_default(),
+            prev_idx
+                .map(|i| arena[i].open_jinja_blocks.clone())
+                .unwrap_or_default(),
+        );
+        let idx = arena.len();
+        arena.push(nl_node);
+        line.append_node(idx);
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum SplitPriority {
-    Operator,
-    Comma,
-    WordOperator,
-    On,
-    BooleanOperator,
-    Keyword,
+    /// Check if a node has formatting disabled.
+    fn node_has_formatting_disabled(node_idx: NodeIndex, arena: &[Node]) -> bool {
+        !arena[node_idx].formatting_disabled.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -172,34 +286,52 @@ mod tests {
     }
 
     #[test]
-    fn test_no_split_short_line() {
+    fn test_no_split_single_node() {
         let mut arena = Vec::new();
         let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
         let a = make_node(&mut arena, TokenType::Name, "a", "");
 
         let mut line = Line::new(None);
-        line.append_node(nl);
         line.append_node(a);
+        line.append_node(nl);
 
         let splitter = LineSplitter::new(88);
-        let result = splitter.maybe_split(&line, &arena);
+        let result = splitter.maybe_split(&line, &mut arena);
         assert_eq!(result.len(), 1);
     }
 
     #[test]
     fn test_split_at_keyword() {
         let mut arena = Vec::new();
-        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
         let select = make_node(&mut arena, TokenType::UntermKeyword, "select", "");
-        let name = make_node(&mut arena, TokenType::Name, "a_very_long_column_name_that_makes_line_too_long", " ");
+        let name = make_node(&mut arena, TokenType::Name, "a", " ");
         let from = make_node(&mut arena, TokenType::UntermKeyword, "from", " ");
-        let table = make_node(&mut arena, TokenType::Name, "another_very_long_table_name_that_pushes_over", " ");
+        let table = make_node(&mut arena, TokenType::Name, "t", " ");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
         let mut line = Line::new(None);
-        line.nodes = vec![nl, select, name, from, table];
+        line.nodes = vec![select, name, from, table, nl];
 
-        let splitter = LineSplitter::new(40);
-        let result = splitter.maybe_split(&line, &arena);
-        assert!(result.len() >= 2);
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should split: select a \n, from \n, t \n
+        assert!(result.len() >= 2, "Expected at least 2 lines, got {}", result.len());
+    }
+
+    #[test]
+    fn test_split_after_comma() {
+        let mut arena = Vec::new();
+        let a = make_node(&mut arena, TokenType::Name, "a", "");
+        let comma = make_node(&mut arena, TokenType::Comma, ",", "");
+        let b = make_node(&mut arena, TokenType::Name, "b", " ");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![a, comma, b, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should split after comma: "a," and "b"
+        assert!(result.len() >= 2, "Expected at least 2 lines, got {}", result.len());
     }
 }

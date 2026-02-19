@@ -1,4 +1,3 @@
-use crate::error::SqlfmtError;
 use crate::node::{Node, NodeIndex};
 use crate::token::{Token, TokenType};
 
@@ -23,55 +22,154 @@ impl NodeManager {
     }
 
     /// Create a Node from a Token, applying whitespace, casing, and depth rules.
+    /// Mirrors Python's NodeManager.create_node() which computes depth from
+    /// previous_node's brackets, not from NodeManager state.
     pub fn create_node(
         &mut self,
         token: Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> Node {
-        let prefix = self.compute_prefix(&token, previous_node, arena);
-        let value = self.standardize_value(&token);
-        let open_brackets = self.open_brackets.clone();
-        let open_jinja_blocks = self.open_jinja_blocks.clone();
+        // Compute open_brackets and open_jinja_blocks from previous_node chain
+        // This matches the Python pattern where depth propagates through nodes
+        let (open_brackets, open_jinja_blocks) =
+            self.compute_open_brackets(&token, previous_node, arena);
 
-        let mut node = Node::new(
-            token.clone(),
+        // Compute formatting_disabled from previous_node
+        let formatting_disabled = self.compute_formatting_disabled(&token, previous_node, arena);
+
+        let (prefix, value) = if !formatting_disabled.is_empty() {
+            // When formatting is disabled, preserve original whitespace and value
+            (token.prefix.clone(), token.token.clone())
+        } else {
+            let prefix = self.compute_prefix(&token, previous_node, arena);
+            let value = self.standardize_value(&token);
+            (prefix, value)
+        };
+
+        Node {
+            token,
             previous_node,
             prefix,
             value,
             open_brackets,
             open_jinja_blocks,
-        );
-
-        // Track bracket state changes
-        if token.token_type.is_opening_bracket() {
-            // Will be tracked by caller after adding to arena
+            formatting_disabled,
         }
-        if token.token_type.is_closing_bracket() {
-            let _ = self.close_bracket(&token);
+    }
+
+    /// Compute the list of open brackets for a new node.
+    ///
+    /// In Python sqlfmt, the Node's open_brackets includes both actual brackets
+    /// AND unterm keywords (for depth tracking). But the NodeManager's open_brackets
+    /// only contains actual brackets (BracketOpen, StatementStart), used by actions
+    /// like HandleNonreservedTopLevelKeyword to decide behavior.
+    fn compute_open_brackets(
+        &mut self,
+        token: &Token,
+        previous_node: Option<NodeIndex>,
+        arena: &[Node],
+    ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
+        // NODE's open_brackets: includes unterm keywords for depth
+        let (mut node_brackets, mut node_jinja) = match previous_node {
+            None => (Vec::new(), Vec::new()),
+            Some(prev_idx) => {
+                let prev = &arena[prev_idx];
+                let mut ob = prev.open_brackets.clone();
+                let mut oj = prev.open_jinja_blocks.clone();
+
+                // Add previous node to brackets if it opens a scope
+                if prev.is_unterm_keyword() || prev.is_opening_bracket() {
+                    ob.push(prev_idx);
+                } else if prev.is_opening_jinja_block() {
+                    oj.push(prev_idx);
+                }
+
+                (ob, oj)
+            }
+        };
+
+        // Handle tokens that reduce depth
+        match token.token_type {
+            TokenType::UntermKeyword | TokenType::SetOperator => {
+                // Pop last unterm keyword if any (unterm keywords at same depth replace each other)
+                if let Some(last) = node_brackets.last() {
+                    if arena[*last].is_unterm_keyword() {
+                        node_brackets.pop();
+                    }
+                }
+            }
+            TokenType::BracketClose | TokenType::StatementEnd => {
+                // Pop until we find the matching opening bracket
+                // First pop unterm keyword on top if any
+                while let Some(last) = node_brackets.last() {
+                    if arena[*last].is_unterm_keyword() {
+                        node_brackets.pop();
+                    } else {
+                        break;
+                    }
+                }
+                // Now pop the actual bracket
+                node_brackets.pop();
+            }
+            TokenType::JinjaBlockEnd => {
+                node_jinja.pop();
+            }
+            TokenType::Semicolon => {
+                node_brackets.clear();
+            }
+            _ => {}
         }
 
-        // Track formatting disabled state
-        if !self.formatting_disabled.is_empty() {
-            node.formatting_disabled = self.formatting_disabled.clone();
+        // NodeManager's open_brackets: ONLY actual brackets, not unterm keywords.
+        // This is used by HandleNonreservedTopLevelKeyword to decide if FROM/USING
+        // should be treated as keywords or names.
+        self.open_brackets = node_brackets
+            .iter()
+            .filter(|&&idx| !arena[idx].is_unterm_keyword())
+            .copied()
+            .collect();
+        self.open_jinja_blocks = node_jinja.clone();
+
+        (node_brackets, node_jinja)
+    }
+
+    /// Compute formatting_disabled state from previous node.
+    fn compute_formatting_disabled(
+        &mut self,
+        token: &Token,
+        previous_node: Option<NodeIndex>,
+        arena: &[Node],
+    ) -> Vec<Token> {
+        let mut formatting_disabled = match previous_node {
+            None => Vec::new(),
+            Some(prev_idx) => arena[prev_idx].formatting_disabled.clone(),
+        };
+
+        if matches!(token.token_type, TokenType::FmtOff | TokenType::Data) {
+            formatting_disabled.push(token.clone());
         }
 
-        node
+        if !formatting_disabled.is_empty() {
+            if let Some(prev_idx) = previous_node {
+                if matches!(
+                    arena[prev_idx].token.token_type,
+                    TokenType::FmtOn | TokenType::Data
+                ) {
+                    formatting_disabled.pop();
+                }
+            }
+        }
+
+        // Keep NodeManager state in sync
+        self.formatting_disabled = formatting_disabled.clone();
+
+        formatting_disabled
     }
 
     /// Open a bracket (called after node is added to arena with its index).
     pub fn push_bracket(&mut self, node_idx: NodeIndex) {
         self.open_brackets.push(node_idx);
-    }
-
-    /// Close the most recent bracket, validating it matches.
-    fn close_bracket(&mut self, _token: &Token) -> std::result::Result<(), SqlfmtError> {
-        if self.open_brackets.is_empty() {
-            // Silently handle — error will be caught by analyzer
-            return Ok(());
-        }
-        self.open_brackets.pop();
-        Ok(())
     }
 
     /// Open a Jinja block.
@@ -85,6 +183,7 @@ impl NodeManager {
     }
 
     /// Compute the whitespace prefix for a token.
+    /// Mirrors Python's NodeManager.whitespace() exactly.
     fn compute_prefix(
         &self,
         token: &Token,
@@ -103,75 +202,132 @@ impl NodeManager {
             return String::new();
         }
 
-        // Look at the previous meaningful token
-        let prev = previous_node.and_then(|idx| {
-            let mut i = Some(idx);
-            while let Some(ii) = i {
-                let n = &arena[ii];
-                if n.token.token_type.does_not_set_prev_sql_context() {
-                    i = n.previous_node;
-                } else {
-                    return Some(n);
-                }
-            }
-            None
-        });
-
+        // Look at the previous meaningful SQL token (skipping newlines/jinja statements)
+        let (prev, extra_whitespace) = Self::get_previous_token(previous_node, arena);
         let prev_type = prev.map(|n| n.token.token_type);
 
-        // After a DOT, most tokens don't get a space
-        if prev_type == Some(TokenType::Dot) {
+        // No space after an open bracket or cast operator (::)
+        if matches!(
+            prev_type,
+            Some(TokenType::BracketOpen) | Some(TokenType::DoublColon)
+        ) {
             return String::new();
         }
 
-        // After an actual opening bracket ( [ <: certain tokens get no space.
-        // Note: StatementStart (CASE) is a logical bracket for depth tracking
-        // but should NOT suppress spaces like literal brackets do.
-        if prev_type == Some(TokenType::BracketOpen)
-            && tt.is_preceded_by_space_except_after_open_bracket()
+        // Always a space before keywords/operators/etc. except after open bracket
+        if tt.is_preceded_by_space_except_after_open_bracket() {
+            return " ".to_string();
+        }
+
+        // Names preceded by dots or colons are namespaced identifiers — no space
+        if tt.is_possible_name()
+            && matches!(
+                prev_type,
+                Some(TokenType::Dot) | Some(TokenType::Colon)
+            )
         {
             return String::new();
         }
 
-        // DoubleColon is tight-bound (no space before or after)
-        if tt == TokenType::DoublColon || prev_type == Some(TokenType::DoublColon) {
+        // Numbers preceded by colons are simple slices — no space
+        if tt == TokenType::Number && prev_type == Some(TokenType::Colon) {
             return String::new();
         }
 
-        // Colon: no space before, one space after
-        if tt == TokenType::Colon {
-            return String::new();
+        // Open brackets with `<` (BQ type definitions like array<int64>)
+        if tt == TokenType::BracketOpen && token.token.contains('<') {
+            if prev_type.is_some() && prev_type != Some(TokenType::BracketOpen) {
+                return " ".to_string();
+            } else {
+                return String::new();
+            }
         }
 
-        // Name/QuotedName after actual opening bracket ( [ get no space
-        if matches!(tt, TokenType::Name | TokenType::QuotedName | TokenType::Star | TokenType::Number)
-            && prev_type == Some(TokenType::BracketOpen)
-        {
-            return String::new();
-        }
-
-        // Opening bracket after a name/quoted_name is a function call — no space
+        // Open brackets that follow names/quoted names are function calls
+        // Open brackets that follow closing brackets are array indexes
+        // Open brackets that follow open brackets are nested brackets
         if tt == TokenType::BracketOpen
             && matches!(
                 prev_type,
                 Some(TokenType::Name)
                     | Some(TokenType::QuotedName)
-                    | Some(TokenType::StatementEnd) // END(...)
+                    | Some(TokenType::BracketOpen)
+                    | Some(TokenType::BracketClose)
             )
         {
             return String::new();
+        }
+
+        // Open square brackets after colons are Databricks variant cols
+        if tt == TokenType::BracketOpen
+            && token.token == "["
+            && prev_type == Some(TokenType::Colon)
+        {
+            return String::new();
+        }
+
+        // Need a space before any other open bracket
+        if tt == TokenType::BracketOpen {
+            return " ".to_string();
+        }
+
+        // Jinja: respect original whitespace
+        if tt.is_jinja() {
+            if !token.prefix.is_empty() || extra_whitespace {
+                return " ".to_string();
+            } else {
+                return String::new();
+            }
+        }
+
+        // After a jinja expression, respect original whitespace
+        if prev_type == Some(TokenType::JinjaExpression) {
+            if !token.prefix.is_empty() || extra_whitespace {
+                return " ".to_string();
+            } else {
+                return String::new();
+            }
         }
 
         // Default: one space
         " ".to_string()
     }
 
-    /// Standardize the token value: lowercase keywords, preserve names.
+    /// Walk backward through previous_node links, skipping tokens that
+    /// don't set SQL context (newlines, jinja statements).
+    /// Returns (previous_token, extra_whitespace).
+    fn get_previous_token<'a>(
+        prev_node: Option<NodeIndex>,
+        arena: &'a [Node],
+    ) -> (Option<&'a Node>, bool) {
+        match prev_node {
+            None => (None, false),
+            Some(idx) => {
+                let node = &arena[idx];
+                if node.token.token_type.does_not_set_prev_sql_context() {
+                    let (prev, _) = Self::get_previous_token(node.previous_node, arena);
+                    (prev, true) // extra_whitespace = true because we skipped
+                } else {
+                    (Some(node), false)
+                }
+            }
+        }
+    }
+
+    /// Standardize the token value: lowercase keywords, normalize whitespace, preserve names.
+    /// Mirrors Python's standardize_value which also normalizes internal whitespace
+    /// in multi-word keywords (e.g., "ORDER  BY" => "order by").
     fn standardize_value(&self, token: &Token) -> String {
         let tt = token.token_type;
 
         if tt.is_always_lowercased() {
-            return token.token.to_ascii_lowercase();
+            // Normalize internal whitespace for multi-word keywords
+            return token
+                .token
+                .to_ascii_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
         }
 
         // For non-quoted names in case-insensitive mode, lowercase
@@ -239,8 +395,8 @@ mod tests {
         nm.push_bracket(5);
         assert_eq!(nm.open_brackets.len(), 2);
 
-        let close_token = Token::new(TokenType::BracketClose, "", ")", 10, 11);
-        nm.close_bracket(&close_token).unwrap();
+        // Brackets are now tracked via compute_open_brackets in create_node
+        nm.open_brackets.pop();
         assert_eq!(nm.open_brackets.len(), 1);
     }
 

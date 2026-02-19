@@ -32,7 +32,7 @@ pub enum SqlfmtError {
 #[derive(Debug)]
 pub enum ControlFlow {
     StopRulesetLexing,
-    CannotMerge(String),
+    CannotMerge,
 }
 
 pub type Result<T> = std::result::Result<T, SqlfmtError>;
