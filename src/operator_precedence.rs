@@ -168,4 +168,95 @@ mod tests {
             assert!(window[0] < window[1]);
         }
     }
+
+    #[test]
+    fn test_between_and_precedence() {
+        // "between" is a Membership-level operator
+        let between_node = make_node(TokenType::WordOperator, "between");
+        let arena = vec![];
+        assert_eq!(
+            OperatorPrecedence::from_node(&between_node, &arena),
+            OperatorPrecedence::Membership
+        );
+
+        // "not between" also Membership
+        let not_between = make_node(TokenType::WordOperator, "not between");
+        assert_eq!(
+            OperatorPrecedence::from_node(&not_between, &arena),
+            OperatorPrecedence::Membership
+        );
+    }
+
+    #[test]
+    fn test_presence_operators() {
+        let arena = vec![];
+
+        let is_node = make_node(TokenType::WordOperator, "is");
+        assert_eq!(
+            OperatorPrecedence::from_node(&is_node, &arena),
+            OperatorPrecedence::Presence
+        );
+
+        let is_not_node = make_node(TokenType::WordOperator, "is not");
+        assert_eq!(
+            OperatorPrecedence::from_node(&is_not_node, &arena),
+            OperatorPrecedence::Presence
+        );
+
+        let exists_node = make_node(TokenType::WordOperator, "exists");
+        assert_eq!(
+            OperatorPrecedence::from_node(&exists_node, &arena),
+            OperatorPrecedence::Presence
+        );
+    }
+
+    #[test]
+    fn test_membership_operators() {
+        let arena = vec![];
+
+        for op in &["in", "not in", "like", "not like", "ilike", "not ilike", "similar to"] {
+            let node = make_node(TokenType::WordOperator, op);
+            assert_eq!(
+                OperatorPrecedence::from_node(&node, &arena),
+                OperatorPrecedence::Membership,
+                "Expected Membership for '{}'",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn test_pg_comparison_operators() {
+        let arena = vec![];
+
+        for op in &["@>", "<@", "@@", "<->", "&&", "?|", "?&", "-|-"] {
+            let node = make_node(TokenType::Operator, op);
+            assert_eq!(
+                OperatorPrecedence::from_node(&node, &arena),
+                OperatorPrecedence::Comparators,
+                "Expected Comparators for '{}'",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn test_on_precedence() {
+        let arena = vec![];
+        let on_node = make_node(TokenType::On, "on");
+        assert_eq!(
+            OperatorPrecedence::from_node(&on_node, &arena),
+            OperatorPrecedence::On
+        );
+    }
+
+    #[test]
+    fn test_as_precedence() {
+        let arena = vec![];
+        let as_node = make_node(TokenType::WordOperator, "as");
+        assert_eq!(
+            OperatorPrecedence::from_node(&as_node, &arena),
+            OperatorPrecedence::As
+        );
+    }
 }

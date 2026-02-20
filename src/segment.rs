@@ -206,4 +206,63 @@ mod tests {
         let segments = build_segments(&[line1, line2], &arena);
         assert!(!segments.is_empty());
     }
+
+    #[test]
+    fn test_build_segments_empty() {
+        let arena: Vec<Node> = Vec::new();
+        let segments = build_segments(&[], &arena);
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn test_segment_head_raises_on_empty() {
+        let arena: Vec<Node> = Vec::new();
+        let seg = Segment::new(vec![]);
+        assert!(seg.head(&arena).is_err());
+    }
+
+    #[test]
+    fn test_segment_tail_raises_on_empty() {
+        let arena: Vec<Node> = Vec::new();
+        let seg = Segment::new(vec![]);
+        assert!(seg.tail(&arena).is_err());
+    }
+
+    #[test]
+    fn test_segment_head_skips_blank() {
+        let mut arena = Vec::new();
+        // First line: blank
+        let nl_idx1 = make_node(&mut arena, TokenType::Newline, "\n");
+        let mut blank_line = Line::new(None);
+        blank_line.nodes.push(nl_idx1);
+
+        // Second line: content
+        let content_line = make_line(&mut arena, TokenType::Name, "a");
+
+        let seg = Segment::new(vec![blank_line, content_line]);
+        let (head_idx, _) = seg.head(&arena).unwrap();
+        assert_eq!(head_idx, 1); // Skipped the blank line
+    }
+
+    #[test]
+    fn test_segment_is_empty() {
+        let seg = Segment::new(vec![]);
+        assert!(seg.is_empty());
+        assert_eq!(seg.len(), 0);
+    }
+
+    #[test]
+    fn test_split_after() {
+        let mut arena = Vec::new();
+        let line1 = make_line(&mut arena, TokenType::Name, "a");
+        let line2 = make_line(&mut arena, TokenType::Name, "b");
+        let line3 = make_line(&mut arena, TokenType::Name, "c");
+
+        let seg = Segment::new(vec![line1, line2, line3]);
+        let result = seg.split_after(0, &arena);
+        assert!(!result.is_empty());
+        // Should have remaining lines after index 0
+        let total_remaining: usize = result.iter().map(|s| s.len()).sum();
+        assert_eq!(total_remaining, 2);
+    }
 }

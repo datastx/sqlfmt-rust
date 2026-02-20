@@ -531,4 +531,94 @@ mod tests {
         // Should merge
         assert!(result.len() <= 2);
     }
+
+    #[test]
+    fn test_no_merge_long_result() {
+        let mut arena = Vec::new();
+        let long_val = "a".repeat(50);
+        let line1 = make_simple_line(&mut arena, TokenType::Name, &long_val);
+        let line2 = make_simple_line(&mut arena, TokenType::Name, &long_val);
+
+        let merger = LineMerger::new(88);
+        let result = merger.maybe_merge_lines(&[line1, line2], &arena);
+        // Should NOT merge since combined length > 88
+        assert!(
+            result.len() >= 2,
+            "Lines too long to merge should stay separate"
+        );
+    }
+
+    #[test]
+    fn test_merge_empty_input() {
+        let arena = Vec::new();
+        let merger = LineMerger::new(88);
+        let result = merger.maybe_merge_lines(&[], &arena);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_no_merge_across_query_dividers() {
+        let mut arena = Vec::new();
+        let line1 = make_simple_line(&mut arena, TokenType::Name, "a");
+
+        // Line with semicolon (query divider)
+        let semi = make_node(&mut arena, TokenType::Semicolon, ";", "");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+        let mut semi_line = Line::new(None);
+        semi_line.append_node(semi);
+        semi_line.append_node(nl);
+
+        let line3 = make_simple_line(&mut arena, TokenType::Name, "b");
+
+        let merger = LineMerger::new(88);
+        let result = merger.maybe_merge_lines(&[line1, semi_line, line3], &arena);
+        // Should not merge across the semicolon
+        assert!(
+            result.len() >= 2,
+            "Should not merge across query dividers, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_no_merge_formatting_disabled() {
+        let mut arena = Vec::new();
+
+        // Create a line with formatting disabled
+        let a = make_node(&mut arena, TokenType::Name, "a", "");
+        arena[a].formatting_disabled =
+            vec![Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11)];
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+        let mut disabled_line = Line::new(None);
+        disabled_line.append_node(a);
+        disabled_line.append_node(nl);
+        disabled_line
+            .formatting_disabled
+            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+
+        let merger = LineMerger::new(88);
+        let result = merger.maybe_merge_lines(&[disabled_line], &arena);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_with_blank_lines() {
+        let mut arena = Vec::new();
+        let line1 = make_simple_line(&mut arena, TokenType::Name, "a");
+
+        // Blank line
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+        let mut blank = Line::new(None);
+        blank.append_node(nl);
+
+        let line3 = make_simple_line(&mut arena, TokenType::Name, "b");
+
+        let merger = LineMerger::new(88);
+        let result = merger.maybe_merge_lines(&[line1, blank, line3], &arena);
+        // Should produce at least 1 line and not crash
+        assert!(
+            !result.is_empty(),
+            "Should handle blank lines without crashing"
+        );
+    }
 }

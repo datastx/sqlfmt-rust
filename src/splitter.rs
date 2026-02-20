@@ -341,4 +341,163 @@ mod tests {
         // Should split after comma: "a," and "b"
         assert!(result.len() >= 2, "Expected at least 2 lines, got {}", result.len());
     }
+
+    #[test]
+    fn test_split_before_operator() {
+        let mut arena = Vec::new();
+        let a = make_node(&mut arena, TokenType::Name, "a", "");
+        let op = make_node(&mut arena, TokenType::Operator, "+", " ");
+        let b = make_node(&mut arena, TokenType::Name, "b", " ");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![a, op, b, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should split before operator: "a" and "+ b"
+        assert!(
+            result.len() >= 2,
+            "Expected split before operator, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_split_before_closing_bracket() {
+        let mut arena = Vec::new();
+        let open = make_node(&mut arena, TokenType::BracketOpen, "(", "");
+        let name = make_node(&mut arena, TokenType::Name, "x", "");
+        let close = make_node(&mut arena, TokenType::BracketClose, ")", "");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![open, name, close, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should split: "(" then "x" then ")"
+        assert!(
+            result.len() >= 2,
+            "Expected split at brackets, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_split_before_semicolon() {
+        let mut arena = Vec::new();
+        let select = make_node(&mut arena, TokenType::UntermKeyword, "select", "");
+        let one = make_node(&mut arena, TokenType::Number, "1", " ");
+        let semi = make_node(&mut arena, TokenType::Semicolon, ";", "");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![select, one, semi, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        assert!(
+            result.len() >= 2,
+            "Expected split before semicolon, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_split_after_opening_bracket() {
+        let mut arena = Vec::new();
+        let name = make_node(&mut arena, TokenType::Name, "count", "");
+        let open = make_node(&mut arena, TokenType::BracketOpen, "(", "");
+        let star = make_node(&mut arena, TokenType::Star, "*", "");
+        let close = make_node(&mut arena, TokenType::BracketClose, ")", "");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![name, open, star, close, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should split after "(": "count(" then "*" then ")"
+        assert!(
+            result.len() >= 2,
+            "Expected split after open bracket, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_no_split_bracket_operator() {
+        // Array indexing: arr[0] - should NOT split before [
+        let mut arena = Vec::new();
+        let arr = make_node(&mut arena, TokenType::Name, "arr", "");
+        let bracket = make_node(&mut arena, TokenType::BracketOpen, "[", "");
+        arena[bracket].value = "[".to_string();
+        let zero = make_node(&mut arena, TokenType::Number, "0", "");
+        let close = make_node(&mut arena, TokenType::BracketClose, "]", "");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![arr, bracket, zero, close, nl];
+
+        let _splitter = LineSplitter::new(88);
+        // is_bracket_operator checks previous_sql_token - in our test the [
+        // follows Name "arr", so it should be a bracket operator
+        assert!(arena[bracket].is_bracket_operator(&arena));
+    }
+
+    #[test]
+    fn test_split_formatting_disabled_returns_unchanged() {
+        let mut arena = Vec::new();
+        let a = make_node(&mut arena, TokenType::Name, "a", "");
+        let op = make_node(&mut arena, TokenType::Operator, "+", " ");
+        let b = make_node(&mut arena, TokenType::Name, "b", " ");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![a, op, b, nl];
+        // Mark as formatting disabled
+        line.formatting_disabled
+            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Should return line unchanged
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_split_set_operator() {
+        let mut arena = Vec::new();
+        let one = make_node(&mut arena, TokenType::Number, "1", "");
+        let union = make_node(&mut arena, TokenType::SetOperator, "union all", " ");
+        let two = make_node(&mut arena, TokenType::Number, "2", " ");
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.nodes = vec![one, union, two, nl];
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        // Set operator divides queries, should split
+        assert!(
+            result.len() >= 2,
+            "Expected split at set operator, got {} lines",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn test_split_blank_line_returns_unchanged() {
+        let mut arena = Vec::new();
+        let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
+
+        let mut line = Line::new(None);
+        line.append_node(nl);
+
+        let splitter = LineSplitter::new(88);
+        let result = splitter.maybe_split(&line, &mut arena);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_blank_line(&arena));
+    }
 }

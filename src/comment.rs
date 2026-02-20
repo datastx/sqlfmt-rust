@@ -166,4 +166,73 @@ mod tests {
         assert!(make_comment("/* block */", false).is_c_style());
         assert!(!make_comment("-- line", false).is_c_style());
     }
+
+    #[test]
+    fn test_is_inline() {
+        // Non-standalone, non-multiline, non-c-style => inline
+        assert!(make_comment("-- inline", false).is_inline());
+
+        // Standalone => NOT inline
+        assert!(!make_comment("-- standalone", true).is_inline());
+
+        // Multiline => NOT inline
+        assert!(!make_comment("-- line1\n-- line2", false).is_inline());
+
+        // C-style => NOT inline
+        assert!(!make_comment("/* block */", false).is_inline());
+    }
+
+    #[test]
+    fn test_empty_comment() {
+        let c = make_comment("--", true);
+        assert_eq!(c.marker(), "--");
+        assert_eq!(c.body(), "");
+        assert_eq!(c.render_standalone("", 88), "--\n");
+    }
+
+    #[test]
+    fn test_jinja_comment() {
+        let c = make_comment("{# this is a jinja comment #}", true);
+        assert!(c.is_jinja_comment());
+        assert_eq!(c.marker(), "{#");
+    }
+
+    #[test]
+    fn test_render_multiline_comment() {
+        let c = make_comment("/* line1\n   line2 */", true);
+        assert!(c.is_multiline());
+        assert!(c.is_c_style());
+        let rendered = c.render_standalone("    ", 88);
+        assert!(rendered.starts_with("    "));
+        assert!(rendered.contains("line1"));
+    }
+
+    #[test]
+    fn test_wrap_long_comment() {
+        let long_text = "-- this is a very long comment that should be wrapped because it exceeds the maximum line length limit of the formatter tool";
+        let c = make_comment(long_text, true);
+        let rendered = c.render_standalone("", 40);
+        // Should produce multiple lines
+        let line_count = rendered.lines().count();
+        assert!(
+            line_count > 1,
+            "Long comment should wrap: got {} lines from: {}",
+            line_count,
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_hash_comment_marker() {
+        let c = make_comment("# python style comment", false);
+        assert_eq!(c.marker(), "#");
+        assert_eq!(c.body(), "python style comment");
+    }
+
+    #[test]
+    fn test_double_slash_comment_marker() {
+        let c = make_comment("// C++ style comment", false);
+        assert_eq!(c.marker(), "//");
+        assert_eq!(c.body(), "C++ style comment");
+    }
 }
