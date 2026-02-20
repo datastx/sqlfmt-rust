@@ -17,7 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      - run: make fmt
 
   clippy:
     name: Clippy
@@ -35,7 +35,7 @@ jobs:
             target
           key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-clippy-
-      - run: cargo clippy -- -D warnings
+      - run: make lint
 
   test:
     name: Tests
@@ -51,7 +51,7 @@ jobs:
             target
           key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-test-
-      - run: cargo test
+      - run: make test
 
   build:
     name: Build
@@ -67,4 +67,4 @@ jobs:
             target
           key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-build-
-      - run: cargo build --release
+      - run: make build
