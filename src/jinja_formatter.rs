@@ -75,6 +75,11 @@ impl JinjaFormatter {
         };
         let inner = inner.trim();
 
+        // If already multiline, preserve the structure
+        if inner.contains('\n') {
+            return None;
+        }
+
         // Normalize whitespace (collapse internal whitespace)
         let inner = Self::normalize_inner_whitespace(inner);
         // Normalize quotes (single → double) matching black's behavior
@@ -258,7 +263,81 @@ impl JinjaFormatter {
         let mut result = String::with_capacity(content.len());
         let mut i = 0;
         while i < bytes.len() {
+            // Skip double-quoted strings entirely (preserve as-is)
+            if bytes[i] == b'"' {
+                // Check for triple-double-quote (""")
+                if i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                    result.push_str("\"\"\"");
+                    i += 3;
+                    while i < bytes.len() {
+                        if i + 2 < bytes.len()
+                            && bytes[i] == b'"'
+                            && bytes[i + 1] == b'"'
+                            && bytes[i + 2] == b'"'
+                        {
+                            result.push_str("\"\"\"");
+                            i += 3;
+                            break;
+                        }
+                        result.push(bytes[i] as char);
+                        i += 1;
+                    }
+                    continue;
+                }
+                result.push('"');
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        result.push(bytes[i] as char);
+                        result.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                continue;
+            }
             if bytes[i] == b'\'' {
+                // Check for triple-single-quote (''')
+                if i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                    let start = i;
+                    i += 3;
+                    let mut has_double_quote = false;
+                    let mut end = None;
+                    while i < bytes.len() {
+                        if i + 2 < bytes.len()
+                            && bytes[i] == b'\''
+                            && bytes[i + 1] == b'\''
+                            && bytes[i + 2] == b'\''
+                        {
+                            end = Some(i + 2);
+                            break;
+                        }
+                        if bytes[i] == b'"' {
+                            has_double_quote = true;
+                        }
+                        i += 1;
+                    }
+                    if let Some(end_pos) = end {
+                        if has_double_quote {
+                            result.push_str(&content[start..=end_pos]);
+                        } else {
+                            result.push_str("\"\"\"");
+                            result.push_str(&content[start + 3..end_pos - 2]);
+                            result.push_str("\"\"\"");
+                        }
+                        i = end_pos + 1;
+                    } else {
+                        result.push_str(&content[start..]);
+                        break;
+                    }
+                    continue;
+                }
                 // Find the matching closing single quote
                 let start = i;
                 i += 1;

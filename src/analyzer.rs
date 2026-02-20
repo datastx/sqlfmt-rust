@@ -279,8 +279,46 @@ impl Analyzer {
             }
 
             Action::HandleDdlAs => {
-                self.add_node(prefix, token_text, TokenType::WordOperator);
+                // In CREATE FUNCTION, AS is an UntermKeyword.
+                // If the next meaningful token is NOT a quoted name/string,
+                // pop the current ruleset to switch back to MAIN rules
+                // so the function body gets proper SQL formatting.
+                self.add_node(prefix, token_text, TokenType::UntermKeyword);
                 self.pos += match_len;
+
+                // Check if the next non-whitespace, non-comment text starts
+                // with a quote character (string literal or quoted name)
+                let remaining = &_source[self.pos..];
+                let trimmed = remaining.trim_start();
+                // Skip comments
+                let mut check = trimmed;
+                loop {
+                    if check.starts_with("--") || check.starts_with("//") || check.starts_with('#')
+                    {
+                        // Skip to end of line
+                        if let Some(nl) = check.find('\n') {
+                            check = check[nl + 1..].trim_start();
+                        } else {
+                            break;
+                        }
+                    } else if check.starts_with("/*") {
+                        if let Some(end) = check.find("*/") {
+                            check = check[end + 2..].trim_start();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                let next_is_quoted = check.starts_with('\'')
+                    || check.starts_with('"')
+                    || check.starts_with('`')
+                    || check.starts_with("$$");
+                if !next_is_quoted {
+                    // Pop back to main rules for the function body
+                    self.pop_rules();
+                }
             }
 
             Action::HandleClosingAngleBracket => {
@@ -364,16 +402,19 @@ impl Analyzer {
             }
 
             Action::LexRuleset { ruleset_name } => {
-                // Push the alternate ruleset and add the keyword as Data
-                // (preserves original text). The ruleset stays active until
-                // a semicolon is hit, which pops the stack.
+                // Push the alternate ruleset and re-lex from the same position.
+                // The new ruleset will re-match the trigger keyword, potentially
+                // with a longer pattern (e.g., "revoke grant option for" in GRANT
+                // ruleset). This mirrors Python sqlfmt's lex_ruleset behavior.
                 let ruleset = match ruleset_name.as_str() {
-                    "unsupported" => crate::rules::unsupported_rules(),
-                    _ => crate::rules::unsupported_rules(), // default fallback
+                    "grant" => crate::rules::grant_rules(),
+                    "function" => crate::rules::function_rules(),
+                    "warehouse" => crate::rules::warehouse_rules(),
+                    "clone" => crate::rules::clone_rules(),
+                    _ => crate::rules::unsupported_rules(),
                 };
-                self.add_node(prefix, token_text, TokenType::Data);
                 self.push_rules(ruleset);
-                self.pos += match_len;
+                // Don't advance pos — let the new ruleset re-lex from current position
             }
         }
 

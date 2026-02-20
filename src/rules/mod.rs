@@ -21,6 +21,18 @@ static FMT_OFF_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::fmt_off_rules);
 /// Cached compiled unsupported DDL rules.
 static UNSUPPORTED_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_unsupported_rules);
 
+/// Cached compiled GRANT rules.
+static GRANT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_grant_rules);
+
+/// Cached compiled FUNCTION rules.
+static FUNCTION_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_function_rules);
+
+/// Cached compiled WAREHOUSE rules.
+static WAREHOUSE_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_warehouse_rules);
+
+/// Cached compiled CLONE rules.
+static CLONE_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_clone_rules);
+
 /// Get the MAIN rule set, cloned from a cached compiled version.
 pub fn main_rules() -> Vec<Rule> {
     MAIN_RULES.clone()
@@ -36,88 +48,247 @@ pub fn unsupported_rules() -> Vec<Rule> {
     UNSUPPORTED_RULES.clone()
 }
 
+/// Get the GRANT DDL rule set.
+pub fn grant_rules() -> Vec<Rule> {
+    GRANT_RULES.clone()
+}
+
+/// Get the FUNCTION DDL rule set.
+pub fn function_rules() -> Vec<Rule> {
+    FUNCTION_RULES.clone()
+}
+
+/// Get the WAREHOUSE DDL rule set.
+pub fn warehouse_rules() -> Vec<Rule> {
+    WAREHOUSE_RULES.clone()
+}
+
+/// Get the CLONE DDL rule set.
+pub fn clone_rules() -> Vec<Rule> {
+    CLONE_RULES.clone()
+}
+
 /// Build rules for unsupported DDL passthrough.
-/// These preserve original text as Data tokens (no formatting applied).
-/// Only comments, semicolons, newlines, and Jinja are handled normally.
+/// Uses ALWAYS rules + Data tokens. Preserves original text verbatim
+/// but handles comments, jinja, strings, and semicolons normally.
 fn build_unsupported_rules() -> Vec<Rule> {
-    let mut rules = vec![
-        // Semicolons reset back to main rules
-        Rule::new(
-            "semicolon",
-            350,
-            r"(;)",
-            Action::HandleSemicolon,
-        ),
-        // Line comments
-        Rule::new(
-            "line_comment",
-            300,
-            r"((--|#|//).*)",
-            Action::AddComment,
-        ),
-        // Block comments
-        Rule::new(
-            "block_comment",
-            301,
-            r"(/\*[\s\S]*?\*/)",
-            Action::AddComment,
-        ),
-        // Jinja comments
-        Rule::new(
-            "jinja_comment",
-            110,
-            r"(\{#[\s\S]*?#\})",
-            Action::AddComment,
-        ),
-        // Jinja expressions: {{ ... }}
-        Rule::new(
-            "jinja_expression",
-            115,
-            r"(\{\{-?[\s\S]*?-?\}\})",
-            Action::HandleJinja {
-                token_type: TokenType::JinjaExpression,
-            },
-        ),
-        // Jinja statements: {% ... %}
-        Rule::new(
-            "jinja_statement",
-            120,
-            r"(\{%-?[\s\S]*?-?%\})",
-            Action::HandleJinja {
-                token_type: TokenType::JinjaStatement,
-            },
-        ),
-        // fmt: off
-        Rule::new(
-            "fmt_off",
-            0,
-            r"((--|#)[^\S\n]*fmt:[^\S\n]*off[^\S\n]*)",
-            Action::AddNode {
-                token_type: TokenType::FmtOff,
-            },
-        ),
-        // fmt: on
-        Rule::new(
-            "fmt_on",
-            1,
-            r"((--|#)[^\S\n]*fmt:[^\S\n]*on[^\S\n]*)",
-            Action::AddNode {
-                token_type: TokenType::FmtOn,
-            },
-        ),
-        // Data: everything else up to semicolon or newline
-        // This preserves original text verbatim
-        Rule::new(
-            "unsupported_data",
-            5000,
-            r"([^;\n]+)",
-            Action::AddNode {
+    let mut rules = core::always_rules();
+    // Quoted names need to be lexed as DATA so they are not formatted
+    // (higher priority than the quoted_name rule in ALWAYS)
+    rules.push(Rule::new(
+        "quoted_name_in_unsupported",
+        199,
+        r#"("(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)"#,
+        Action::AddNode {
+            token_type: TokenType::Data,
+        },
+    ));
+    // Data: everything else up to semicolon or newline
+    rules.push(Rule::new(
+        "unsupported_line",
+        1000,
+        r"([^;\n]+)",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
                 token_type: TokenType::Data,
-            },
-        ),
-        // Newline
-        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
+            }),
+        },
+    ));
+    rules.sort_by_key(|r| r.priority);
+    rules
+}
+
+/// Build GRANT/REVOKE rules: CORE + grant-specific keywords.
+fn build_grant_rules() -> Vec<Rule> {
+    let mut rules = core::core_rules();
+    let grant_keywords = vec![
+        "grant",
+        r"revoke(\s+grant\s+option\s+for)?",
+        "on",
+        "to",
+        "from",
+        r"with\s+grant\s+option",
+        r"granted\s+by",
+        "cascade",
+        "restrict",
     ];
+    let pattern = grant_keywords.join("|");
+    rules.push(Rule::new(
+        "unterm_keyword",
+        1300,
+        &format!(r"({})\b", pattern),
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
+            }),
+        },
+    ));
+    rules.sort_by_key(|r| r.priority);
+    rules
+}
+
+/// Build CREATE/ALTER FUNCTION rules: CORE + function-specific keywords.
+fn build_function_rules() -> Vec<Rule> {
+    let mut rules = core::core_rules();
+    // AS keyword → HandleDdlAs
+    rules.push(Rule::new(
+        "function_as",
+        1100,
+        r"(as)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::HandleDdlAs),
+        },
+    ));
+    // Word operators
+    rules.push(Rule::new(
+        "word_operator",
+        1200,
+        r"(to|from|runtime_version)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::WordOperator,
+            }),
+        },
+    ));
+    // Function-specific unterminated keywords
+    let fn_keywords = vec![
+        // CREATE/ALTER FUNCTION patterns
+        r"create(\s+or\s+replace)?(\s+temp(orary)?)?(\s+secure)?(\s+external)?(\s+table)?\s+function(\s+if\s+not\s+exists)?",
+        r"(alter|drop)\s+function(\s+if\s+exists)?",
+        "language",
+        "transform",
+        "immutable",
+        "stable",
+        "volatile",
+        r"(not\s+)?leakproof",
+        r"called\s+on\s+null\s+input",
+        r"returns\s+null\s+on\s+null\s+input",
+        r"return(s)?",
+        "strict",
+        r"(external\s+)?security\s+(invoker|definer)",
+        r"parallel\s+(unsafe|restricted|safe)",
+        "cost",
+        "rows",
+        "support",
+        // Snowflake
+        r"((un)?set\s+)?comment",
+        "imports",
+        "packages",
+        "handler",
+        "target_path",
+        r"(not\s+)?null",
+        // Snowflake external function params
+        r"((un)?set\s+)?api_integration",
+        r"((un)?set\s+)?headers",
+        r"((un)?set\s+)?context_headers",
+        r"((un)?set\s+)?max_batch_rows",
+        r"((un)?set\s+)?compression",
+        r"((un)?set\s+)?request_translator",
+        r"((un)?set\s+)?response_translator",
+        // BigQuery
+        "options",
+        r"remote\s+with\s+connection",
+        // ALTER
+        r"rename\s+to",
+        r"owner\s+to",
+        r"set\s+schema",
+        r"(no\s+)?depends\s+on\s+extension",
+        "cascade",
+        "restrict",
+        // Alter snowflake
+        r"(un)?set\s+secure",
+        // PG catchall for set
+        r"(re)?set(\s+all)?",
+    ];
+    let pattern = fn_keywords.join("|");
+    rules.push(Rule::new(
+        "unterm_keyword",
+        1300,
+        &format!(r"({})\b", pattern),
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
+            }),
+        },
+    ));
+    rules.sort_by_key(|r| r.priority);
+    rules
+}
+
+/// Build CREATE/ALTER WAREHOUSE rules: CORE + warehouse-specific keywords.
+fn build_warehouse_rules() -> Vec<Rule> {
+    let mut rules = core::core_rules();
+    let wh_keywords = vec![
+        r"create(\s+or\s+replace)?\s+warehouse(\s+if\s+not\s+exists)?",
+        r"alter\s+warehouse(\s+if\s+exists)?",
+        // Object properties
+        r"(with\s+|(un)?set\s+)?warehouse_type",
+        r"(with\s+|(un)?set\s+)?warehouse_size",
+        r"(with\s+|(un)?set\s+)?max_cluster_count",
+        r"(with\s+|(un)?set\s+)?min_cluster_count",
+        r"(with\s+|(un)?set\s+)?scaling_policy",
+        r"(with\s+|(un)?set\s+)?auto_suspend",
+        r"(with\s+|(un)?set\s+)?auto_resume",
+        r"(with\s+|(un)?set\s+)?initially_suspended",
+        r"(with\s+|(un)?set\s+)?resource_monitor",
+        r"(with\s+|(un)?set\s+)?comment",
+        r"(with\s+|(un)?set\s+)?enable_query_acceleration",
+        r"(with\s+|(un)?set\s+)?query_acceleration_max_scale_factor",
+        r"(with\s+|(un)?set\s+)?tag",
+        // Object params
+        r"(set\s+)?max_concurrency_level",
+        r"(set\s+)?statement_queued_timeout_in_seconds",
+        r"(set\s+)?statement_timeout_in_seconds",
+        // Alter
+        "suspend",
+        r"resume(\s+if\s+suspended)?",
+        r"abort\s+all\s+queries",
+        r"rename\s+to",
+    ];
+    let pattern = wh_keywords.join("|");
+    rules.push(Rule::new(
+        "unterm_keyword",
+        1300,
+        &format!(r"({})\b", pattern),
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
+            }),
+        },
+    ));
+    rules.sort_by_key(|r| r.priority);
+    rules
+}
+
+/// Build CREATE ... CLONE rules: CORE + clone-specific keywords.
+fn build_clone_rules() -> Vec<Rule> {
+    let mut rules = core::core_rules();
+    let clone_keywords = vec![
+        r"create(\s+or\s+replace)?\s+(database|schema|table|stage|file\s+format|sequence|stream|task)(\s+if\s+not\s+exists)?",
+        "clone",
+    ];
+    let pattern = clone_keywords.join("|");
+    rules.push(Rule::new(
+        "unterm_keyword",
+        1300,
+        &format!(r"({})\b", pattern),
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
+            }),
+        },
+    ));
+    // Word operators: at, before
+    rules.push(Rule::new(
+        "word_operator",
+        1500,
+        r"(at|before)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::WordOperator,
+            }),
+        },
+    ));
     rules.sort_by_key(|r| r.priority);
     rules
 }
@@ -519,7 +690,63 @@ fn build_main_rules() -> Vec<Rule> {
         },
     ));
 
-    // Unsupported DDL: comprehensive list with HandleNonreservedTopLevelKeyword
+    // GRANT/REVOKE → GRANT ruleset (must come before unsupported_ddl)
+    rules.push(Rule::new(
+        "grant",
+        2010,
+        r"(grant|revoke)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
+                inner: Box::new(Action::LexRuleset {
+                    ruleset_name: "grant".to_string(),
+                }),
+            }),
+        },
+    ));
+
+    // CREATE ... CLONE → CLONE ruleset (must come before create_function and unsupported_ddl)
+    rules.push(Rule::new(
+        "create_clone",
+        2015,
+        r"(create(?:\s+or\s+replace)?\s+(?:database|schema|table|stage|file\s+format|sequence|stream|task)(?:\s+if\s+not\s+exists)?\s+\S+\s+clone)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
+                inner: Box::new(Action::LexRuleset {
+                    ruleset_name: "clone".to_string(),
+                }),
+            }),
+        },
+    ));
+
+    // CREATE/ALTER FUNCTION → FUNCTION ruleset
+    rules.push(Rule::new(
+        "create_function",
+        2020,
+        r"(create(?:\s+or\s+replace)?(?:\s+temp(?:orary)?)?(?:\s+secure)?(?:\s+external)?(?:\s+table)?\s+function(?:\s+if\s+not\s+exists)?|(?:alter|drop)\s+function(?:\s+if\s+exists)?)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
+                inner: Box::new(Action::LexRuleset {
+                    ruleset_name: "function".to_string(),
+                }),
+            }),
+        },
+    ));
+
+    // CREATE/ALTER WAREHOUSE → WAREHOUSE ruleset
+    rules.push(Rule::new(
+        "create_warehouse",
+        2030,
+        r"(create(?:\s+or\s+replace)?\s+warehouse(?:\s+if\s+not\s+exists)?|alter\s+warehouse(?:\s+if\s+exists)?)\b",
+        Action::HandleReservedKeyword {
+            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
+                inner: Box::new(Action::LexRuleset {
+                    ruleset_name: "warehouse".to_string(),
+                }),
+            }),
+        },
+    ));
+
+    // Generic unsupported DDL: comprehensive list (fallback)
     let ddl_keywords = vec![
         r"create\s+or\s+replace",
         "create",
@@ -552,8 +779,6 @@ fn build_main_rules() -> Vec<Rule> {
         "discard",
         "do",
         "export",
-        "grant",
-        "revoke",
         "handler",
         r"import\s+foreign\s+schema",
         r"import\s+table",

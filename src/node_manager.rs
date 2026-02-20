@@ -482,6 +482,7 @@ impl NodeManager {
 
     /// Convert single-quoted strings to double-quoted strings inside Jinja tags.
     /// Matches Python sqlfmt's jinjafmt behavior (black's quote normalization).
+    /// Skips existing double-quoted strings to avoid corrupting their content.
     fn convert_jinja_quotes(text: &str) -> String {
         let bytes = text.as_bytes();
         let len = bytes.len();
@@ -489,7 +490,81 @@ impl NodeManager {
         let mut i = 0;
 
         while i < len {
+            // Skip double-quoted strings entirely (preserve as-is)
+            if bytes[i] == b'"' {
+                // Check for triple-double-quote (""")
+                if i + 2 < len && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+                    result.extend_from_slice(b"\"\"\"");
+                    i += 3;
+                    while i < len {
+                        if i + 2 < len
+                            && bytes[i] == b'"'
+                            && bytes[i + 1] == b'"'
+                            && bytes[i + 2] == b'"'
+                        {
+                            result.extend_from_slice(b"\"\"\"");
+                            i += 3;
+                            break;
+                        }
+                        result.push(bytes[i]);
+                        i += 1;
+                    }
+                    continue;
+                }
+                result.push(b'"');
+                i += 1;
+                while i < len && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        result.push(bytes[i]);
+                        result.push(bytes[i + 1]);
+                        i += 2;
+                        continue;
+                    }
+                    result.push(bytes[i]);
+                    i += 1;
+                }
+                if i < len {
+                    result.push(bytes[i]);
+                    i += 1;
+                }
+                continue;
+            }
             if bytes[i] == b'\'' {
+                // Check for triple-single-quote (''')
+                if i + 2 < len && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+                    let start = i;
+                    i += 3;
+                    let mut contains_double_quote = false;
+                    let mut end = None;
+                    while i < len {
+                        if i + 2 < len
+                            && bytes[i] == b'\''
+                            && bytes[i + 1] == b'\''
+                            && bytes[i + 2] == b'\''
+                        {
+                            end = Some(i + 2);
+                            break;
+                        }
+                        if bytes[i] == b'"' {
+                            contains_double_quote = true;
+                        }
+                        i += 1;
+                    }
+                    if let Some(end_pos) = end {
+                        if contains_double_quote {
+                            result.extend_from_slice(&bytes[start..=end_pos]);
+                        } else {
+                            result.extend_from_slice(b"\"\"\"");
+                            result.extend_from_slice(&bytes[start + 3..end_pos - 2]);
+                            result.extend_from_slice(b"\"\"\"");
+                        }
+                        i = end_pos + 1;
+                    } else {
+                        result.extend_from_slice(&bytes[start..]);
+                        break;
+                    }
+                    continue;
+                }
                 // Found a single-quoted string. Scan to find the closing quote.
                 let start = i;
                 i += 1;
