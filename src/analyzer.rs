@@ -222,16 +222,14 @@ impl Analyzer {
             }
 
             Action::HandleSemicolon => {
-                // Don't flush immediately — let the newline handler flush.
-                // This allows trailing comments on the same line (after the ;)
-                // to be captured as inline comments on the preceding content line,
-                // rather than becoming orphaned standalone comments.
                 self.add_node(prefix, token_text, TokenType::Semicolon);
+                self.flush_line_buffer();
                 // Reset rule stack to base
                 while self.rule_stack.len() > 1 {
                     self.rule_stack.pop();
                 }
                 self.node_manager.reset();
+                self.suppress_next_newline = true;
                 self.pos += match_len;
             }
 
