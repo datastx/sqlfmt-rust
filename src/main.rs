@@ -86,10 +86,7 @@ fn main() {
     let is_stdin = cli.files.len() == 1 && cli.files[0].to_string_lossy() == "-";
 
     // Load configuration
-    let base_mode = match sqlfmt::config::load_config(
-        &cli.files,
-        cli.config.as_deref(),
-    ) {
+    let base_mode = match sqlfmt::config::load_config(&cli.files, cli.config.as_deref()) {
         Ok(mode) => mode,
         Err(e) => {
             eprintln!("Configuration error: {}", e);

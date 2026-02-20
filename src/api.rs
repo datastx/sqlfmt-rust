@@ -9,9 +9,7 @@ use crate::report::{FileResult, Report};
 /// Format a SQL string according to the given mode.
 /// This is the core API function.
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
-    let dialect = mode
-        .dialect()
-        .map_err(|e| SqlfmtError::Config(e))?;
+    let dialect = mode.dialect().map_err(SqlfmtError::Config)?;
 
     // Step 1: Lex (parse tokens)
     let mut analyzer = dialect.initialize_analyzer(mode.line_length);

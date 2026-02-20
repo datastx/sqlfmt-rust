@@ -423,7 +423,9 @@ mod tests {
     #[test]
     fn test_is_opening_closing_jinja_block() {
         assert!(make_node(TokenType::JinjaBlockStart, "{% if x %}", None).is_opening_jinja_block());
-        assert!(make_node(TokenType::JinjaBlockKeyword, "{% elif y %}", None).is_opening_jinja_block());
+        assert!(
+            make_node(TokenType::JinjaBlockKeyword, "{% elif y %}", None).is_opening_jinja_block()
+        );
         assert!(make_node(TokenType::JinjaBlockEnd, "{% endif %}", None).is_closing_jinja_block());
         assert!(!make_node(TokenType::JinjaExpression, "{{ x }}", None).is_opening_jinja_block());
         assert!(!make_node(TokenType::JinjaExpression, "{{ x }}", None).is_closing_jinja_block());

@@ -112,11 +112,10 @@ impl Analyzer {
                     self.node_manager.push_bracket(last_idx);
                 } else if *token_type == TokenType::StatementEnd {
                     // END: check if there is a matching CASE (StatementStart) in open brackets
-                    let has_matching_case = self
-                        .node_manager
-                        .open_brackets
-                        .iter()
-                        .any(|&idx| self.arena[idx].token.token_type == TokenType::StatementStart);
+                    let has_matching_case =
+                        self.node_manager.open_brackets.iter().any(|&idx| {
+                            self.arena[idx].token.token_type == TokenType::StatementStart
+                        });
                     if has_matching_case {
                         self.add_node(prefix, token_text, TokenType::StatementEnd);
                     } else {
@@ -168,10 +167,8 @@ impl Analyzer {
 
             Action::HandleReservedKeyword { inner } => {
                 // If preceded by DOT, treat as a NAME instead
-                let prev_is_dot = self.previous_node_index().map_or(false, |idx| {
-                    let node = &self.arena[idx];
-                    let _prev = node.get_previous_sql_token(&self.arena);
-                    // Actually check if the *direct* prev node (skipping newlines) is DOT
+                let prev_is_dot = self.previous_node_index().is_some_and(|_idx| {
+                    // Check if the *direct* prev node (skipping newlines) is DOT
                     self.get_prev_sql_type() == Some(TokenType::Dot)
                 });
                 if prev_is_dot {
@@ -280,7 +277,9 @@ impl Analyzer {
         self.arena.push(node);
 
         // Track opening brackets
-        if token_type.is_opening_bracket() && !matches!(token_type, TokenType::BracketOpen if token_text.contains('<')) {
+        if token_type.is_opening_bracket()
+            && !matches!(token_type, TokenType::BracketOpen if token_text.contains('<'))
+        {
             self.node_manager.push_bracket(idx);
         }
 
@@ -330,9 +329,15 @@ impl Analyzer {
         }
 
         // Add a newline node at the END (mirrors Python behavior)
-        let nl_prev = self.node_buffer.last().copied().or_else(|| self.previous_node_index());
+        let nl_prev = self
+            .node_buffer
+            .last()
+            .copied()
+            .or_else(|| self.previous_node_index());
         let nl_token = Token::new(TokenType::Newline, "", "\n", self.pos, self.pos + 1);
-        let nl_node = self.node_manager.create_node(nl_token, nl_prev, &self.arena);
+        let nl_node = self
+            .node_manager
+            .create_node(nl_token, nl_prev, &self.arena);
         let nl_idx = self.arena.len();
         self.arena.push(nl_node);
         line.append_node(nl_idx);
@@ -560,8 +565,7 @@ mod tests {
     #[test]
     fn test_parse_window_function() {
         let mut analyzer = create_analyzer();
-        let source =
-            "SELECT ROW_NUMBER() OVER (PARTITION BY category ORDER BY id) AS rn FROM t\n";
+        let source = "SELECT ROW_NUMBER() OVER (PARTITION BY category ORDER BY id) AS rn FROM t\n";
         let query = analyzer.parse_query(source).unwrap();
         let rendered = query.render(&analyzer.arena);
         assert!(rendered.contains("over"));
@@ -585,7 +589,11 @@ mod tests {
         let mut analyzer = create_analyzer();
         let source = "SELECT CAST(x AS ARRAY<INT>)\n";
         let result = analyzer.parse_query(source);
-        assert!(result.is_ok(), "Angle bracket type should parse: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Angle bracket type should parse: {:?}",
+            result.err()
+        );
     }
 
     #[test]

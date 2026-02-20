@@ -221,10 +221,7 @@ impl NodeManager {
 
         // Names preceded by dots or colons are namespaced identifiers — no space
         if tt.is_possible_name()
-            && matches!(
-                prev_type,
-                Some(TokenType::Dot) | Some(TokenType::Colon)
-            )
+            && matches!(prev_type, Some(TokenType::Dot) | Some(TokenType::Colon))
         {
             return String::new();
         }
@@ -259,9 +256,7 @@ impl NodeManager {
         }
 
         // Open square brackets after colons are Databricks variant cols
-        if tt == TokenType::BracketOpen
-            && token.token == "["
-            && prev_type == Some(TokenType::Colon)
+        if tt == TokenType::BracketOpen && token.token == "[" && prev_type == Some(TokenType::Colon)
         {
             return String::new();
         }
@@ -296,10 +291,7 @@ impl NodeManager {
     /// Walk backward through previous_node links, skipping tokens that
     /// don't set SQL context (newlines, jinja statements).
     /// Returns (previous_token, extra_whitespace).
-    fn get_previous_token<'a>(
-        prev_node: Option<NodeIndex>,
-        arena: &'a [Node],
-    ) -> (Option<&'a Node>, bool) {
+    fn get_previous_token(prev_node: Option<NodeIndex>, arena: &[Node]) -> (Option<&Node>, bool) {
         match prev_node {
             None => (None, false),
             Some(idx) => {

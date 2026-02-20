@@ -6,10 +6,7 @@ use crate::mode::Mode;
 
 /// Load sqlfmt configuration from a pyproject.toml file.
 /// Searches parent directories for pyproject.toml if no config path is given.
-pub fn load_config(
-    files: &[PathBuf],
-    config_path: Option<&Path>,
-) -> Result<Mode, SqlfmtError> {
+pub fn load_config(files: &[PathBuf], config_path: Option<&Path>) -> Result<Mode, SqlfmtError> {
     let mut mode = Mode::default();
 
     let config_file = match config_path {
@@ -116,10 +113,7 @@ fn load_config_from_path(path: &Path) -> Result<HashMap<String, toml::Value>, Sq
 }
 
 /// Apply configuration values to a Mode.
-fn apply_config(
-    mode: &mut Mode,
-    config: &HashMap<String, toml::Value>,
-) -> Result<(), SqlfmtError> {
+fn apply_config(mode: &mut Mode, config: &HashMap<String, toml::Value>) -> Result<(), SqlfmtError> {
     if let Some(toml::Value::Integer(n)) = config.get("line_length") {
         mode.line_length = *n as usize;
     }

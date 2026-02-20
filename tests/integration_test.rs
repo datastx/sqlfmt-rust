@@ -28,16 +28,14 @@ fn test_format_lowercases_keywords() {
 
 #[test]
 fn test_format_preserves_quoted_names() {
-    let result =
-        format_string("SELECT \"MyColumn\" FROM \"MyTable\"\n", &default_mode()).unwrap();
+    let result = format_string("SELECT \"MyColumn\" FROM \"MyTable\"\n", &default_mode()).unwrap();
     assert!(result.contains("\"MyColumn\""));
     assert!(result.contains("\"MyTable\""));
 }
 
 #[test]
 fn test_format_handles_string_literals() {
-    let result =
-        format_string("SELECT 'hello world' AS greeting\n", &default_mode()).unwrap();
+    let result = format_string("SELECT 'hello world' AS greeting\n", &default_mode()).unwrap();
     assert!(result.contains("'hello world'"));
 }
 
@@ -90,32 +88,20 @@ fn test_format_cte() {
 
 #[test]
 fn test_format_union() {
-    let result = format_string(
-        "SELECT 1 UNION ALL SELECT 2\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("SELECT 1 UNION ALL SELECT 2\n", &default_mode()).unwrap();
     assert!(result.contains("union all"));
 }
 
 #[test]
 fn test_format_multiple_statements() {
-    let result = format_string(
-        "SELECT 1;\nSELECT 2;\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("SELECT 1;\nSELECT 2;\n", &default_mode()).unwrap();
     let semicolons = result.matches(';').count();
     assert!(semicolons >= 2);
 }
 
 #[test]
 fn test_format_comments_preserved() {
-    let result = format_string(
-        "-- this is a comment\nSELECT 1\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("-- this is a comment\nSELECT 1\n", &default_mode()).unwrap();
     assert!(result.contains("this is a comment"));
 }
 
@@ -143,11 +129,7 @@ fn test_format_jinja_block() {
 
 #[test]
 fn test_format_operators() {
-    let result = format_string(
-        "SELECT a + b, c * d, e || f FROM t\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("SELECT a + b, c * d, e || f FROM t\n", &default_mode()).unwrap();
     assert!(result.contains("+"));
     assert!(result.contains("*"));
     assert!(result.contains("||"));
@@ -166,11 +148,7 @@ fn test_format_between() {
 
 #[test]
 fn test_format_in_clause() {
-    let result = format_string(
-        "SELECT * FROM t WHERE x IN (1, 2, 3)\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("SELECT * FROM t WHERE x IN (1, 2, 3)\n", &default_mode()).unwrap();
     assert!(result.contains("in"));
 }
 
@@ -230,28 +208,40 @@ fn test_idempotent_formatting() {
 fn test_format_fixture_file() {
     let source = std::fs::read_to_string("tests/fixtures/snowflake_query.sql").unwrap();
     let result = format_string(&source, &default_mode());
-    assert!(result.is_ok(), "Should successfully format snowflake_query.sql");
+    assert!(
+        result.is_ok(),
+        "Should successfully format snowflake_query.sql"
+    );
 }
 
 #[test]
 fn test_format_fixture_duckdb() {
     let source = std::fs::read_to_string("tests/fixtures/duckdb_query.sql").unwrap();
     let result = format_string(&source, &duckdb_mode());
-    assert!(result.is_ok(), "Should successfully format duckdb_query.sql");
+    assert!(
+        result.is_ok(),
+        "Should successfully format duckdb_query.sql"
+    );
 }
 
 #[test]
 fn test_format_fixture_jinja() {
     let source = std::fs::read_to_string("tests/fixtures/jinja_template.sql").unwrap();
     let result = format_string(&source, &default_mode());
-    assert!(result.is_ok(), "Should successfully format jinja_template.sql");
+    assert!(
+        result.is_ok(),
+        "Should successfully format jinja_template.sql"
+    );
 }
 
 #[test]
 fn test_format_fixture_complex_case() {
     let source = std::fs::read_to_string("tests/fixtures/complex_case.sql").unwrap();
     let result = format_string(&source, &default_mode());
-    assert!(result.is_ok(), "Should successfully format complex_case.sql");
+    assert!(
+        result.is_ok(),
+        "Should successfully format complex_case.sql"
+    );
 }
 
 // --- Phase 1-5 parity tests ---
@@ -364,23 +354,19 @@ fn test_format_not_regexp() {
 
 #[test]
 fn test_format_binary_octal_hex_literals() {
-    let result = format_string(
-        "SELECT 0xFF, 0b1010, 0o777, .5, 42L\n",
-        &default_mode(),
-    )
-    .unwrap();
-    assert!(result.contains("0xFF") || result.contains("0xff"), "Hex literal: {}", result);
+    let result = format_string("SELECT 0xFF, 0b1010, 0o777, .5, 42L\n", &default_mode()).unwrap();
+    assert!(
+        result.contains("0xFF") || result.contains("0xff"),
+        "Hex literal: {}",
+        result
+    );
     assert!(result.contains("0b1010"), "Binary literal: {}", result);
     assert!(result.contains("0o777"), "Octal literal: {}", result);
 }
 
 #[test]
 fn test_format_curly_brace_brackets() {
-    let result = format_string(
-        "SELECT {fn NOW()}\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("SELECT {fn NOW()}\n", &default_mode()).unwrap();
     assert!(
         result.contains("{"),
         "Curly braces should be supported: {}",
@@ -390,11 +376,7 @@ fn test_format_curly_brace_brackets() {
 
 #[test]
 fn test_format_explain_analyze() {
-    let result = format_string(
-        "EXPLAIN ANALYZE SELECT * FROM t\n",
-        &default_mode(),
-    )
-    .unwrap();
+    let result = format_string("EXPLAIN ANALYZE SELECT * FROM t\n", &default_mode()).unwrap();
     assert!(
         result.contains("explain analyze") || result.contains("explain"),
         "EXPLAIN ANALYZE should be recognized: {}",
@@ -455,7 +437,10 @@ fn test_preformatted_select_from_where() {
     let source = "select\n    a_long_field_name,\n    another_long_field_name,\n    a_long_field_name + another_long_field_name as c,\n    final_field\nfrom my_schema.\"my_QUOTED_ table!\"\nwhere one_field < another_field\n";
     let result = format_string(source, &default_mode()).unwrap();
     let second = format_string(&result, &default_mode()).unwrap();
-    assert_eq!(result, second, "Preformatted select/from/where should be idempotent");
+    assert_eq!(
+        result, second,
+        "Preformatted select/from/where should be idempotent"
+    );
 }
 
 // Mirrors Python fixture 003_literals (numeric arithmetic)
@@ -463,8 +448,16 @@ fn test_preformatted_select_from_where() {
 fn test_numeric_literals_and_arithmetic() {
     let source = "SELECT 1 + 1, sum(1.05), 1.4 - 15.17, -.45 + -0.99, -0.710 - sum(-34.5), (1 + 1) - (4 - 0.6), 3.14159\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("3.14159"), "Should preserve decimals: {}", result);
-    assert!(result.contains("sum"), "Should contain sum function: {}", result);
+    assert!(
+        result.contains("3.14159"),
+        "Should preserve decimals: {}",
+        result
+    );
+    assert!(
+        result.contains("sum"),
+        "Should contain sum function: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Numeric literals should be idempotent");
 }
@@ -510,7 +503,11 @@ fn test_fixture_joins() {
     let source = "SELECT a.id, b.name, c.value FROM table_a a INNER JOIN table_b b ON a.id = b.a_id LEFT OUTER JOIN table_c c ON b.id = c.b_id CROSS JOIN table_d d\n";
     let result = format_string(source, &default_mode()).unwrap();
     assert!(result.contains("inner join"), "INNER JOIN: {}", result);
-    assert!(result.contains("left outer join") || result.contains("left join"), "LEFT JOIN: {}", result);
+    assert!(
+        result.contains("left outer join") || result.contains("left join"),
+        "LEFT JOIN: {}",
+        result
+    );
     assert!(result.contains("cross join"), "CROSS JOIN: {}", result);
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Joins should be idempotent");
@@ -536,7 +533,10 @@ fn test_fixture_chained_boolean_between() {
     // BETWEEN x AND y should stay together
     assert!(result.contains("between"), "BETWEEN: {}", result);
     let second = format_string(&result, &default_mode()).unwrap();
-    assert_eq!(result, second, "Chained boolean/between should be idempotent");
+    assert_eq!(
+        result, second,
+        "Chained boolean/between should be idempotent"
+    );
 }
 
 // Mirrors Python fixture 112_semicolons (multiple statements)
@@ -611,7 +611,11 @@ fn test_fixture_within_group() {
 fn test_fixture_psycopg_placeholders() {
     let source = "SELECT * FROM t WHERE id = %s AND name = %(name)s\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("%s") || result.contains("%(name)s"), "Placeholders: {}", result);
+    assert!(
+        result.contains("%s") || result.contains("%(name)s"),
+        "Placeholders: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Psycopg placeholders should be idempotent");
 }
@@ -631,7 +635,11 @@ fn test_fixture_array_literals() {
 fn test_fixture_values_clause() {
     let source = "INSERT INTO my_table VALUES (1, 'a'), (2, 'b'), (3, 'c')\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("values") || result.contains("1"), "VALUES: {}", result);
+    assert!(
+        result.contains("values") || result.contains("1"),
+        "VALUES: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Values clause should be idempotent");
 }
@@ -662,7 +670,11 @@ fn test_fixture_blank_lines() {
     let source = "SELECT 1\n\n\n\n\n\nSELECT 2\n";
     let result = format_string(source, &default_mode()).unwrap();
     // Should reduce excessive blank lines
-    assert!(!result.contains("\n\n\n\n"), "Too many blanks: {:?}", result);
+    assert!(
+        !result.contains("\n\n\n\n"),
+        "Too many blanks: {:?}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Blank line handling should be idempotent");
 }
@@ -672,7 +684,11 @@ fn test_fixture_blank_lines() {
 fn test_fixture_more_comments() {
     let source = "-- first comment\nSELECT\n    -- second comment\n    col1,\n    col2  -- inline comment\nFROM t\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("select") || result.contains("col1"), "Content: {}", result);
+    assert!(
+        result.contains("select") || result.contains("col1"),
+        "Content: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Comments should be idempotent");
 }
@@ -700,7 +716,11 @@ fn test_fixture_duckdb_joins() {
 fn test_fixture_assignment_statement() {
     let source = "SET my_var = 42;\nSELECT my_var\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("set") || result.contains("my_var"), "SET: {}", result);
+    assert!(
+        result.contains("set") || result.contains("my_var"),
+        "SET: {}",
+        result
+    );
     assert!(result.contains("select"), "SELECT: {}", result);
 }
 
@@ -716,9 +736,14 @@ fn test_fixture_spark_number_literals() {
 // Mirrors Python fixture 400_create_fn_and_select
 #[test]
 fn test_fixture_create_function() {
-    let source = "CREATE FUNCTION my_func() RETURNS INT LANGUAGE SQL AS $$ SELECT 1 $$;\nSELECT my_func()\n";
+    let source =
+        "CREATE FUNCTION my_func() RETURNS INT LANGUAGE SQL AS $$ SELECT 1 $$;\nSELECT my_func()\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("create function") || result.contains("my_func"), "CREATE FUNCTION: {}", result);
+    assert!(
+        result.contains("create function") || result.contains("my_func"),
+        "CREATE FUNCTION: {}",
+        result
+    );
 }
 
 // Mirrors Python fixture 401_explain_select
@@ -753,7 +778,8 @@ fn test_fixture_create_view() {
 // Mirrors Python fixture 109_lateral_flatten (Snowflake)
 #[test]
 fn test_fixture_lateral_flatten() {
-    let source = "SELECT f.value::string AS item FROM my_table, LATERAL FLATTEN(input => my_array) f\n";
+    let source =
+        "SELECT f.value::string AS item FROM my_table, LATERAL FLATTEN(input => my_array) f\n";
     let result = format_string(source, &default_mode()).unwrap();
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Lateral flatten should be idempotent");
@@ -800,7 +826,10 @@ ORDER BY ds.department, ds.day
 "#;
     let result = format_string(source, &default_mode()).unwrap();
     let second = format_string(&result, &default_mode()).unwrap();
-    assert_eq!(result, second, "Complex CTE + Join + Window should be idempotent");
+    assert_eq!(
+        result, second,
+        "Complex CTE + Join + Window should be idempotent"
+    );
 }
 
 // Mirrors Python test: GRANT/REVOKE statements
@@ -808,8 +837,16 @@ ORDER BY ds.department, ds.day
 fn test_fixture_grant_revoke() {
     let source = "GRANT SELECT ON my_table TO my_role;\nREVOKE INSERT ON my_table FROM my_role;\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("grant") || result.contains("select"), "GRANT: {}", result);
-    assert!(result.contains("revoke") || result.contains("insert"), "REVOKE: {}", result);
+    assert!(
+        result.contains("grant") || result.contains("select"),
+        "GRANT: {}",
+        result
+    );
+    assert!(
+        result.contains("revoke") || result.contains("insert"),
+        "REVOKE: {}",
+        result
+    );
 }
 
 // Mirrors Python test: ALTER TABLE
@@ -843,7 +880,8 @@ fn test_fixture_jinja_for_loop() {
 // Test: Jinja macro
 #[test]
 fn test_fixture_jinja_macro() {
-    let source = "{% macro my_macro(arg1, arg2) %}\nSELECT {{ arg1 }}, {{ arg2 }}\n{% endmacro %}\n";
+    let source =
+        "{% macro my_macro(arg1, arg2) %}\nSELECT {{ arg1 }}, {{ arg2 }}\n{% endmacro %}\n";
     let result = format_string(source, &default_mode()).unwrap();
     assert!(result.contains("{% macro"), "MACRO: {}", result);
     assert!(result.contains("{% endmacro %}"), "ENDMACRO: {}", result);
@@ -854,7 +892,8 @@ fn test_fixture_jinja_macro() {
 // Test: LATERAL VIEW (Spark)
 #[test]
 fn test_fixture_lateral_view() {
-    let source = "SELECT col1, exploded_col FROM my_table LATERAL VIEW EXPLODE(array_col) AS exploded_col\n";
+    let source =
+        "SELECT col1, exploded_col FROM my_table LATERAL VIEW EXPLODE(array_col) AS exploded_col\n";
     let result = format_string(source, &default_mode()).unwrap();
     assert!(result.contains("lateral view"), "LATERAL VIEW: {}", result);
     let second = format_string(&result, &default_mode()).unwrap();
@@ -876,7 +915,11 @@ fn test_fixture_qualify_detailed() {
 fn test_fixture_presence_operators() {
     let source = "SELECT * FROM t WHERE a IS NULL AND b IS NOT NULL AND c IS DISTINCT FROM d\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("is null") || result.contains("is"), "IS NULL: {}", result);
+    assert!(
+        result.contains("is null") || result.contains("is"),
+        "IS NULL: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Presence operators should be idempotent");
 }
@@ -884,7 +927,8 @@ fn test_fixture_presence_operators() {
 // Test: LIKE / ILIKE / NOT LIKE
 #[test]
 fn test_fixture_like_operators() {
-    let source = "SELECT * FROM t WHERE name LIKE '%test%' AND code NOT LIKE 'X%' AND label ILIKE '%foo%'\n";
+    let source =
+        "SELECT * FROM t WHERE name LIKE '%test%' AND code NOT LIKE 'X%' AND label ILIKE '%foo%'\n";
     let result = format_string(source, &default_mode()).unwrap();
     assert!(result.contains("like"), "LIKE: {}", result);
     let second = format_string(&result, &default_mode()).unwrap();
@@ -982,7 +1026,11 @@ fn test_fixture_c_style_comments() {
 fn test_fixture_for_update() {
     let source = "SELECT * FROM t WHERE id = 1 FOR UPDATE\n";
     let result = format_string(source, &default_mode()).unwrap();
-    assert!(result.contains("for update") || result.contains("for"), "FOR UPDATE: {}", result);
+    assert!(
+        result.contains("for update") || result.contains("for"),
+        "FOR UPDATE: {}",
+        result
+    );
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "For update should be idempotent");
 }

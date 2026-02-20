@@ -1,6 +1,6 @@
 /// Common regex pattern building blocks used across rule definitions.
 /// These mirror the Python sqlfmt `group()` and `any()` pattern helpers.
-
+///
 /// Join alternatives into a regex group: `(alt1|alt2|...)`.
 pub fn group(alternatives: &[&str]) -> String {
     format!("({})", alternatives.join("|"))
@@ -82,7 +82,8 @@ pub const JINJA_COMMENT: &str = r"(\{#[\s\S]*?#\})";
 // ---- Operator patterns ----
 
 /// Comparison operators
-pub const COMPARISON_OPERATORS: &str = r"(<>|!=|>=|<=|=>|<=>|!~\*|!~|~\*|~|>>|<<|->|->>|#>>|#>|\|\||\*\*|[+\-*/%&|^=<>])";
+pub const COMPARISON_OPERATORS: &str =
+    r"(<>|!=|>=|<=|=>|<=>|!~\*|!~|~\*|~|>>|<<|->|->>|#>>|#>|\|\||\*\*|[+\-*/%&|^=<>])";
 
 /// The star character (needs special handling as it can be SELECT * or multiplication)
 pub const STAR: &str = r"(\*)";

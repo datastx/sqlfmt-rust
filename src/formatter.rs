@@ -55,7 +55,7 @@ impl QueryFormatter {
     }
 
     /// Stage 2: Format Jinja templates.
-    fn format_jinja(&self, query: &mut Query, arena: &mut Vec<Node>) {
+    fn format_jinja(&self, query: &mut Query, arena: &mut [Node]) {
         let formatter = JinjaFormatter::new(self.line_length);
         for line in &mut query.lines {
             formatter.format_line(line, arena);
@@ -79,8 +79,7 @@ impl QueryFormatter {
                 .first_content_node(arena)
                 .map(|n| {
                     n.is_opening_jinja_block()
-                        && n.token.token_type
-                            == crate::token::TokenType::JinjaBlockStart
+                        && n.token.token_type == crate::token::TokenType::JinjaBlockStart
                 })
                 .unwrap_or(false);
 
@@ -113,9 +112,7 @@ impl QueryFormatter {
                 }
 
                 // Apply dedent: adjust block start/end nodes to min_depth
-                if min_sql_depth < usize::MAX
-                    && min_sql_depth < start_depth.0
-                {
+                if min_sql_depth < usize::MAX && min_sql_depth < start_depth.0 {
                     // Adjust block start line
                     if let Some(node_idx) = lines[i].first_content_node_idx(arena) {
                         while arena[node_idx].open_brackets.len() > min_sql_depth {
@@ -264,9 +261,8 @@ mod tests {
 
     #[test]
     fn test_format_join_query() {
-        let (query, arena) = format_sql(
-            "SELECT a.id, b.name FROM table_a a LEFT JOIN table_b b ON a.id = b.a_id\n",
-        );
+        let (query, arena) =
+            format_sql("SELECT a.id, b.name FROM table_a a LEFT JOIN table_b b ON a.id = b.a_id\n");
         let rendered = query.render(&arena);
         assert!(rendered.contains("left join"));
         assert!(rendered.contains("on"));
@@ -305,9 +301,8 @@ mod tests {
 
     #[test]
     fn test_format_cte_query() {
-        let (query, arena) = format_sql(
-            "WITH cte AS (SELECT 1 AS id, 'hello' AS name) SELECT * FROM cte\n",
-        );
+        let (query, arena) =
+            format_sql("WITH cte AS (SELECT 1 AS id, 'hello' AS name) SELECT * FROM cte\n");
         let rendered = query.render(&arena);
         assert!(rendered.contains("with"));
         assert!(rendered.contains("as"));
@@ -316,9 +311,8 @@ mod tests {
 
     #[test]
     fn test_format_subquery() {
-        let (query, arena) = format_sql(
-            "SELECT * FROM (SELECT id FROM users WHERE active = true) sub\n",
-        );
+        let (query, arena) =
+            format_sql("SELECT * FROM (SELECT id FROM users WHERE active = true) sub\n");
         let rendered = query.render(&arena);
         assert!(rendered.contains("select"));
         assert!(rendered.contains("from"));
@@ -326,9 +320,7 @@ mod tests {
 
     #[test]
     fn test_format_jinja_block() {
-        let (query, arena) = format_sql(
-            "{% if flag %}\nSELECT 1\n{% endif %}\n",
-        );
+        let (query, arena) = format_sql("{% if flag %}\nSELECT 1\n{% endif %}\n");
         let rendered = query.render(&arena);
         assert!(rendered.contains("{% if flag %}"));
         assert!(rendered.contains("{% endif %}"));

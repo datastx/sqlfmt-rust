@@ -56,7 +56,7 @@ impl LineMerger {
                     match only_segment.head(arena) {
                         Ok((head_idx, _head_line)) => {
                             // Include head line(s)
-                            let include_end = if only_segment.lines.len() > 0
+                            let include_end = if !only_segment.lines.is_empty()
                                 && head_idx == 0
                                 && only_segment.lines[0]
                                     .first_content_node(arena)
@@ -78,14 +78,20 @@ impl LineMerger {
                                     if let Ok((tail_idx, _)) = only_segment.tail(arena) {
                                         let tail_start = only_segment.lines.len() - 1 - tail_idx;
                                         if include_end < tail_start {
-                                            let inner = &only_segment.lines[include_end..tail_start];
-                                            merged_lines.extend(self.maybe_merge_lines(inner, arena));
-                                            merged_lines.extend_from_slice(&only_segment.lines[tail_start..]);
+                                            let inner =
+                                                &only_segment.lines[include_end..tail_start];
+                                            merged_lines
+                                                .extend(self.maybe_merge_lines(inner, arena));
+                                            merged_lines.extend_from_slice(
+                                                &only_segment.lines[tail_start..],
+                                            );
                                         } else {
-                                            merged_lines.extend(self.maybe_merge_lines(remaining, arena));
+                                            merged_lines
+                                                .extend(self.maybe_merge_lines(remaining, arena));
                                         }
                                     } else {
-                                        merged_lines.extend(self.maybe_merge_lines(remaining, arena));
+                                        merged_lines
+                                            .extend(self.maybe_merge_lines(remaining, arena));
                                     }
                                 } else {
                                     merged_lines.extend(self.maybe_merge_lines(remaining, arena));
@@ -105,11 +111,7 @@ impl LineMerger {
 
     /// Try to merge all lines into a single line.
     /// Returns CannotMerge error if the result would be too long or violate rules.
-    fn create_merged_line(
-        &self,
-        lines: &[Line],
-        arena: &[Node],
-    ) -> Result<Vec<Line>, ControlFlow> {
+    fn create_merged_line(&self, lines: &[Line], arena: &[Node]) -> Result<Vec<Line>, ControlFlow> {
         if lines.len() <= 1 {
             return Ok(lines.to_vec());
         }
@@ -231,11 +233,7 @@ impl LineMerger {
     }
 
     /// Fix standalone operators by merging them with the next line.
-    fn fix_standalone_operators(
-        &self,
-        mut segments: Vec<Segment>,
-        arena: &[Node],
-    ) -> Vec<Segment> {
+    fn fix_standalone_operators(&self, mut segments: Vec<Segment>, arena: &[Node]) -> Vec<Segment> {
         for segment in &mut segments {
             if let Ok((head_idx, head_line)) = segment.head(arena) {
                 let is_standalone_op = head_line
@@ -289,11 +287,7 @@ impl LineMerger {
             }
         }
         // Final run
-        new_segments.extend(self.try_merge_operator_segments(
-            &segments[head..],
-            op_tiers,
-            arena,
-        ));
+        new_segments.extend(self.try_merge_operator_segments(&segments[head..], op_tiers, arena));
 
         new_segments
     }
@@ -342,11 +336,7 @@ impl LineMerger {
     }
 
     /// Stubborn merge: force-merge tight-binding operators (AS, OVER, etc.)
-    fn maybe_stubbornly_merge(
-        &self,
-        segments: Vec<Segment>,
-        arena: &[Node],
-    ) -> Vec<Segment> {
+    fn maybe_stubbornly_merge(&self, segments: Vec<Segment>, arena: &[Node]) -> Vec<Segment> {
         if segments.len() <= 1 {
             return segments;
         }
@@ -373,11 +363,7 @@ impl LineMerger {
         let p1_flags: Vec<bool> = new_segments
             .iter()
             .map(|s| {
-                self.segment_continues_operator_sequence(
-                    s,
-                    OperatorPrecedence::Comparators,
-                    arena,
-                )
+                self.segment_continues_operator_sequence(s, OperatorPrecedence::Comparators, arena)
             })
             .collect();
 
@@ -427,51 +413,38 @@ impl LineMerger {
         // Try 1: Merge head of this segment with entire previous segment
         let mut try_lines = prev_segment.lines.clone();
         try_lines.push(head_line.clone());
-        match self.create_merged_line(&try_lines, arena) {
-            Ok(merged) => {
-                let mut result_seg = Segment::new(merged);
-                result_seg
-                    .lines
-                    .extend_from_slice(&segment.lines[head_idx + 1..]);
-                new_segments.push(result_seg);
-                return new_segments;
-            }
-            Err(_) => {}
+        if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+            let mut result_seg = Segment::new(merged);
+            result_seg
+                .lines
+                .extend_from_slice(&segment.lines[head_idx + 1..]);
+            new_segments.push(result_seg);
+            return new_segments;
         }
 
         // Try 2: Merge entire segment onto last line of previous segment
         if let Ok((tail_idx, tail_line)) = prev_segment.tail(arena) {
             let mut try_lines = vec![tail_line.clone()];
             try_lines.extend(segment.lines.clone());
-            match self.create_merged_line(&try_lines, arena) {
-                Ok(merged) => {
-                    let tail_start = prev_segment.lines.len() - 1 - tail_idx;
-                    let mut result_seg = Segment::new(
-                        prev_segment.lines[..tail_start].to_vec(),
-                    );
-                    result_seg.lines.extend(merged);
-                    new_segments.push(result_seg);
-                    return new_segments;
-                }
-                Err(_) => {}
+            if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+                let tail_start = prev_segment.lines.len() - 1 - tail_idx;
+                let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
+                result_seg.lines.extend(merged);
+                new_segments.push(result_seg);
+                return new_segments;
             }
 
             // Try 3: Merge just head of this segment onto last line of previous segment
             let try_lines = vec![tail_line.clone(), head_line.clone()];
-            match self.create_merged_line(&try_lines, arena) {
-                Ok(merged) => {
-                    let tail_start = prev_segment.lines.len() - 1 - tail_idx;
-                    let mut result_seg = Segment::new(
-                        prev_segment.lines[..tail_start].to_vec(),
-                    );
-                    result_seg.lines.extend(merged);
-                    result_seg
-                        .lines
-                        .extend_from_slice(&segment.lines[head_idx + 1..]);
-                    new_segments.push(result_seg);
-                    return new_segments;
-                }
-                Err(_) => {}
+            if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+                let tail_start = prev_segment.lines.len() - 1 - tail_idx;
+                let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
+                result_seg.lines.extend(merged);
+                result_seg
+                    .lines
+                    .extend_from_slice(&segment.lines[head_idx + 1..]);
+                new_segments.push(result_seg);
+                return new_segments;
             }
         }
 
@@ -592,9 +565,13 @@ mod tests {
         let mut disabled_line = Line::new(None);
         disabled_line.append_node(a);
         disabled_line.append_node(nl);
-        disabled_line
-            .formatting_disabled
-            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+        disabled_line.formatting_disabled.push(Token::new(
+            TokenType::FmtOff,
+            "",
+            "-- fmt: off",
+            0,
+            11,
+        ));
 
         let merger = LineMerger::new(88);
         let result = merger.maybe_merge_lines(&[disabled_line], &arena);

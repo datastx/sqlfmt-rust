@@ -274,7 +274,7 @@ pub fn main_rules() -> Vec<Rule> {
     ];
     let word_op_pattern = word_ops
         .iter()
-        .map(|op| format!("{}", op))
+        .map(|op| op.to_string())
         .collect::<Vec<_>>()
         .join("|");
     rules.push(Rule::new(
@@ -453,7 +453,7 @@ pub fn main_rules() -> Vec<Rule> {
     ];
     let ddl_pattern = ddl_keywords
         .iter()
-        .map(|k| format!("{}", k))
+        .map(|k| k.to_string())
         .collect::<Vec<_>>()
         .join("|");
     rules.push(Rule::new(

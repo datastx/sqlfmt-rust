@@ -66,18 +66,21 @@ impl OperatorPrecedence {
         match normalized.as_str() {
             "as" => Self::As,
             "over" | "within group" | "filter" => Self::OtherTight,
-            "in" | "not in" | "global not in" | "global in"
-            | "like" | "not like" | "like any" | "like all"
-            | "not like any" | "not like all"
-            | "ilike" | "not ilike" | "ilike any" | "ilike all"
-            | "not ilike any" | "not ilike all"
-            | "similar to" | "not similar to"
-            | "regexp" | "not regexp"
-            | "rlike" | "not rlike" => Self::Membership,
+            "in" | "not in" | "global not in" | "global in" | "like" | "not like" | "like any"
+            | "like all" | "not like any" | "not like all" | "ilike" | "not ilike"
+            | "ilike any" | "ilike all" | "not ilike any" | "not ilike all" | "similar to"
+            | "not similar to" | "regexp" | "not regexp" | "rlike" | "not rlike" => {
+                Self::Membership
+            }
             "between" | "not between" => Self::Membership,
-            "is" | "is not" | "isnull" | "notnull" | "is distinct from"
+            "is"
+            | "is not"
+            | "isnull"
+            | "notnull"
+            | "is distinct from"
             | "is not distinct from"
-            | "exists" | "not exists" => Self::Presence,
+            | "exists"
+            | "not exists" => Self::Presence,
             "interval" | "some" => Self::Other,
             _ => Self::Other,
         }
@@ -89,9 +92,7 @@ impl OperatorPrecedence {
             "*" | "/" | "%" | "||" => Self::Multiplication,
             "+" | "-" => Self::Addition,
             "=" | "!=" | "<>" | "<" | ">" | "<=" | ">=" | "<=>" | "~" | "!~" | "~*" | "!~*"
-            | "@>" | "<@" | "@@" | "<->" | "!!" | "&&" | "?|" | "?&" | "-|-" => {
-                Self::Comparators
-            }
+            | "@>" | "<@" | "@@" | "<->" | "!!" | "&&" | "?|" | "?&" | "-|-" => Self::Comparators,
             _ => Self::Other,
         }
     }
@@ -118,7 +119,10 @@ mod tests {
     fn test_double_colon_precedence() {
         let node = make_node(TokenType::DoublColon, "::");
         let arena = vec![];
-        assert_eq!(OperatorPrecedence::from_node(&node, &arena), OperatorPrecedence::DoubleColon);
+        assert_eq!(
+            OperatorPrecedence::from_node(&node, &arena),
+            OperatorPrecedence::DoubleColon
+        );
     }
 
     #[test]
@@ -128,9 +132,18 @@ mod tests {
         let not_node = make_node(TokenType::BooleanOperator, "not");
         let arena = vec![];
 
-        assert_eq!(OperatorPrecedence::from_node(&and_node, &arena), OperatorPrecedence::BoolAnd);
-        assert_eq!(OperatorPrecedence::from_node(&or_node, &arena), OperatorPrecedence::BoolOr);
-        assert_eq!(OperatorPrecedence::from_node(&not_node, &arena), OperatorPrecedence::BoolNot);
+        assert_eq!(
+            OperatorPrecedence::from_node(&and_node, &arena),
+            OperatorPrecedence::BoolAnd
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&or_node, &arena),
+            OperatorPrecedence::BoolOr
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&not_node, &arena),
+            OperatorPrecedence::BoolNot
+        );
     }
 
     #[test]
@@ -140,9 +153,18 @@ mod tests {
         let over_node = make_node(TokenType::WordOperator, "over");
         let arena = vec![];
 
-        assert_eq!(OperatorPrecedence::from_node(&as_node, &arena), OperatorPrecedence::As);
-        assert_eq!(OperatorPrecedence::from_node(&in_node, &arena), OperatorPrecedence::Membership);
-        assert_eq!(OperatorPrecedence::from_node(&over_node, &arena), OperatorPrecedence::OtherTight);
+        assert_eq!(
+            OperatorPrecedence::from_node(&as_node, &arena),
+            OperatorPrecedence::As
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&in_node, &arena),
+            OperatorPrecedence::Membership
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&over_node, &arena),
+            OperatorPrecedence::OtherTight
+        );
     }
 
     #[test]
@@ -153,10 +175,22 @@ mod tests {
         let exp = make_node(TokenType::Operator, "**");
         let arena = vec![];
 
-        assert_eq!(OperatorPrecedence::from_node(&plus, &arena), OperatorPrecedence::Addition);
-        assert_eq!(OperatorPrecedence::from_node(&mul, &arena), OperatorPrecedence::Multiplication);
-        assert_eq!(OperatorPrecedence::from_node(&eq, &arena), OperatorPrecedence::Comparators);
-        assert_eq!(OperatorPrecedence::from_node(&exp, &arena), OperatorPrecedence::Exponent);
+        assert_eq!(
+            OperatorPrecedence::from_node(&plus, &arena),
+            OperatorPrecedence::Addition
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&mul, &arena),
+            OperatorPrecedence::Multiplication
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&eq, &arena),
+            OperatorPrecedence::Comparators
+        );
+        assert_eq!(
+            OperatorPrecedence::from_node(&exp, &arena),
+            OperatorPrecedence::Exponent
+        );
     }
 
     #[test]
@@ -214,7 +248,15 @@ mod tests {
     fn test_membership_operators() {
         let arena = vec![];
 
-        for op in &["in", "not in", "like", "not like", "ilike", "not ilike", "similar to"] {
+        for op in &[
+            "in",
+            "not in",
+            "like",
+            "not like",
+            "ilike",
+            "not ilike",
+            "similar to",
+        ] {
             let node = make_node(TokenType::WordOperator, op);
             assert_eq!(
                 OperatorPrecedence::from_node(&node, &arena),

@@ -114,19 +114,9 @@ pub fn always_rules() -> Vec<Rule> {
             Action::AddComment,
         ),
         // Semicolon
-        Rule::new(
-            "semicolon",
-            350,
-            r"(;)",
-            Action::HandleSemicolon,
-        ),
+        Rule::new("semicolon", 350, r"(;)", Action::HandleSemicolon),
         // Newline
-        Rule::new(
-            "newline",
-            9000,
-            r"(\n)",
-            Action::HandleNewline,
-        ),
+        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
     ]
 }
 

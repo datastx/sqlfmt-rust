@@ -202,9 +202,7 @@ impl LineSplitter {
             (comments.to_vec(), Vec::new())
         } else if comments.is_empty() {
             (Vec::new(), Vec::new())
-        } else if new_nodes.len() == 1
-            && arena[new_nodes[0]].token.token_type == TokenType::Comma
-        {
+        } else if new_nodes.len() == 1 && arena[new_nodes[0]].token.token_type == TokenType::Comma {
             // If head is just a comma, pass all comments to tail
             (Vec::new(), comments.to_vec())
         } else {
@@ -213,8 +211,6 @@ impl LineSplitter {
             for comment in comments {
                 if comment.is_standalone || comment.is_multiline() {
                     head_c.push(comment.clone());
-                } else if comment.is_inline() {
-                    tail_c.push(comment.clone());
                 } else {
                     tail_c.push(comment.clone());
                 }
@@ -245,9 +241,7 @@ impl LineSplitter {
     /// Append a newline node to the end of a line.
     fn append_newline(&self, line: &mut Line, arena: &mut Vec<Node>) {
         let prev_idx = line.nodes.last().copied();
-        let spos = prev_idx
-            .map(|i| arena[i].token.epos)
-            .unwrap_or(0);
+        let spos = prev_idx.map(|i| arena[i].token.epos).unwrap_or(0);
         let nl_token = Token::new(TokenType::Newline, "", "\n", spos, spos);
         let nl_node = Node::new(
             nl_token,
@@ -322,7 +316,11 @@ mod tests {
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
         // Should split: select a \n, from \n, t \n
-        assert!(result.len() >= 2, "Expected at least 2 lines, got {}", result.len());
+        assert!(
+            result.len() >= 2,
+            "Expected at least 2 lines, got {}",
+            result.len()
+        );
     }
 
     #[test]
@@ -339,7 +337,11 @@ mod tests {
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
         // Should split after comma: "a," and "b"
-        assert!(result.len() >= 2, "Expected at least 2 lines, got {}", result.len());
+        assert!(
+            result.len() >= 2,
+            "Expected at least 2 lines, got {}",
+            result.len()
+        );
     }
 
     #[test]

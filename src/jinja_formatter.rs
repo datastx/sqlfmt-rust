@@ -16,7 +16,7 @@ impl JinjaFormatter {
 
     /// Format Jinja tags in a line.
     /// Currently normalizes whitespace inside Jinja delimiters.
-    pub fn format_line(&self, line: &mut Line, arena: &mut Vec<Node>) {
+    pub fn format_line(&self, line: &mut Line, arena: &mut [Node]) {
         for &idx in &line.nodes {
             if arena[idx].is_jinja() {
                 self.normalize_jinja_whitespace(&mut arena[idx]);

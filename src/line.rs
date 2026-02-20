@@ -23,9 +23,7 @@ impl Line {
     }
 
     pub fn is_blank_line(&self, arena: &[Node]) -> bool {
-        self.nodes.len() == 1
-            && arena[self.nodes[0]].is_newline()
-            && self.comments.is_empty()
+        self.nodes.len() == 1 && arena[self.nodes[0]].is_newline() && self.comments.is_empty()
     }
 
     /// Depth of the first non-newline node.
@@ -562,7 +560,8 @@ mod tests {
     fn test_has_formatting_disabled() {
         let mut line = Line::new(None);
         assert!(!line.has_formatting_disabled());
-        line.formatting_disabled.push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+        line.formatting_disabled
+            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
         assert!(line.has_formatting_disabled());
     }
 
