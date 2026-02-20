@@ -713,9 +713,11 @@ impl JinjaFormatter {
 
         // Look for function call pattern: keyword name(args)
         if let Some(paren_pos) = find_top_level_paren(inner) {
-            if inner.ends_with(')') {
+            // Find the matching closing ) for this (
+            if let Some(close_pos) = find_matching_close(inner, paren_pos) {
                 let before_paren = &inner[..paren_pos];
-                let args_content = &inner[paren_pos + 1..inner.len() - 1];
+                let args_content = &inner[paren_pos + 1..close_pos];
+                let after_close = inner[close_pos + 1..].trim();
                 let args = split_by_commas(args_content);
 
                 let indent1 = " ".repeat(base_indent + 4);
@@ -738,7 +740,14 @@ impl JinjaFormatter {
                     }
                 }
                 let close_indent = " ".repeat(base_indent);
-                lines.push(format!("{}) {}", close_indent, close_delim));
+                if after_close.is_empty() {
+                    lines.push(format!("{}) {}", close_indent, close_delim));
+                } else {
+                    lines.push(format!(
+                        "{}) {} {}",
+                        close_indent, after_close, close_delim
+                    ));
+                }
 
                 return Some(lines.join("\n"));
             }
@@ -912,7 +921,64 @@ fn find_top_level_paren(s: &str) -> Option<usize> {
             continue;
         }
         if bytes[i] == b'(' {
-            return Some(i);
+            // Skip empty or trivially short function calls like `lower()`.
+            // Find the matching `)` and check if the content is substantial.
+            let paren_start = i;
+            let mut depth = 1;
+            let mut j = i + 1;
+            while j < bytes.len() && depth > 0 {
+                if bytes[j] == b'\'' || bytes[j] == b'"' {
+                    let q = bytes[j];
+                    j += 1;
+                    while j < bytes.len() && bytes[j] != q {
+                        if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                            j += 1;
+                        }
+                        j += 1;
+                    }
+                } else if bytes[j] == b'(' {
+                    depth += 1;
+                } else if bytes[j] == b')' {
+                    depth -= 1;
+                }
+                j += 1;
+            }
+            // Content between parens (excluding the parens themselves)
+            let content = &s[paren_start + 1..j.saturating_sub(1)];
+            if !content.trim().is_empty() {
+                return Some(paren_start);
+            }
+            // Empty parens — skip past them and continue searching
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Find the position of the closing `)` that matches the `(` at `open_pos`.
+fn find_matching_close(s: &str, open_pos: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 1;
+    let mut i = open_pos + 1;
+    while i < bytes.len() && depth > 0 {
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let q = bytes[i];
+            i += 1;
+            while i < bytes.len() && bytes[i] != q {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+        } else if bytes[i] == b'(' {
+            depth += 1;
+        } else if bytes[i] == b')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
         }
         i += 1;
     }

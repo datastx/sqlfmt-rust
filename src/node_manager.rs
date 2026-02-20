@@ -265,6 +265,7 @@ impl NodeManager {
                                 | TokenType::BracketOpen
                                 | TokenType::StatementStart
                                 | TokenType::SetOperator
+                                | TokenType::Star
                                 | TokenType::On
                                 | TokenType::DoublColon
                         ),

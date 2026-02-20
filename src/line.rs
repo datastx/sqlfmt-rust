@@ -109,13 +109,21 @@ impl Line {
     }
 
     /// Render with comments, respecting max_line_length.
-    pub fn render_with_comments(&self, arena: &[Node], max_line_length: usize) -> String {
+    /// If `indent_override` is provided, use it for standalone comment indentation
+    /// instead of the line's own depth-based indentation.
+    pub fn render_with_comments(
+        &self,
+        arena: &[Node],
+        max_line_length: usize,
+        indent_override: Option<&str>,
+    ) -> String {
         if self.comments.is_empty() {
             return self.render(arena);
         }
 
         let mut result = String::new();
-        let prefix = self.indentation(arena);
+        let own_prefix = self.indentation(arena);
+        let prefix = indent_override.unwrap_or(&own_prefix);
 
         // Standalone comments go before the line
         for comment in &self.comments {
@@ -657,7 +665,7 @@ mod tests {
         );
         line.append_comment(comment);
 
-        let rendered = line.render_with_comments(&arena, 88);
+        let rendered = line.render_with_comments(&arena, 88, None);
         assert!(rendered.contains("a"));
         assert!(rendered.contains("inline comment"));
     }
@@ -679,7 +687,7 @@ mod tests {
         );
         line.append_comment(comment);
 
-        let rendered = line.render_with_comments(&arena, 88);
+        let rendered = line.render_with_comments(&arena, 88, None);
         assert!(rendered.contains("standalone"));
         assert!(rendered.contains("a"));
     }
