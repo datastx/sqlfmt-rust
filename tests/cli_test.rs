@@ -1,6 +1,7 @@
 //! CLI integration tests for the sqlfmt binary.
 //! Mirrors Python sqlfmt's `test_end_to_end.py`.
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -8,7 +9,7 @@ use tempfile::TempDir;
 
 /// Helper: get a Command for the sqlfmt binary.
 fn sqlfmt() -> Command {
-    Command::cargo_bin("sqlfmt").expect("binary should exist")
+    cargo_bin_cmd!("sqlfmt")
 }
 
 /// Helper: create a temp directory with SQL files copied from fixtures.
