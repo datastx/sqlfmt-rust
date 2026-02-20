@@ -66,6 +66,10 @@ struct Cli {
     #[arg(long)]
     no_color: bool,
 
+    /// Number of threads for parallel processing (0 = all cores).
+    #[arg(short = 't', long, default_value_t = 0)]
+    threads: usize,
+
     /// Disable multi-threaded processing.
     #[arg(long)]
     single_process: bool,
@@ -113,6 +117,7 @@ fn main() {
         no_progressbar: cli.no_progressbar,
         no_color: cli.no_color,
         force_color: cli.force_color,
+        threads: cli.threads,
         single_process: cli.single_process,
         reset_cache: cli.reset_cache,
     };

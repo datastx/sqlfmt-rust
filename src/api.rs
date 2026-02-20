@@ -44,10 +44,24 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
     } else {
         // Parallel processing with rayon
         use rayon::prelude::*;
-        let results: Vec<FileResult> = matching_paths
-            .par_iter()
-            .map(|path| format_file(path, mode))
-            .collect();
+
+        let num_threads = if mode.threads > 0 {
+            mode.threads
+        } else {
+            0 // rayon default: all available cores
+        };
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .expect("failed to build rayon thread pool");
+
+        let results: Vec<FileResult> = pool.install(|| {
+            matching_paths
+                .par_iter()
+                .map(|path| format_file(path, mode))
+                .collect()
+        });
         for result in results {
             report.add(result);
         }

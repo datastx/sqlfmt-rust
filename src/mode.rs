@@ -47,6 +47,10 @@ pub struct Mode {
     #[serde(default)]
     pub force_color: bool,
 
+    /// Number of threads for parallel processing (0 = all cores).
+    #[serde(default)]
+    pub threads: usize,
+
     #[serde(default)]
     pub single_process: bool,
 
@@ -111,6 +115,7 @@ impl Default for Mode {
             no_progressbar: false,
             no_color: false,
             force_color: false,
+            threads: 0,
             single_process: false,
             reset_cache: false,
         }

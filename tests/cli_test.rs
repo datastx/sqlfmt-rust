@@ -424,6 +424,42 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("SQL formatter"));
 }
 
+// ─── Thread count ───
+
+#[test]
+fn test_threads_flag() {
+    let dir = setup_temp_dir(&[("a.sql", "SELECT    1\n"), ("b.sql", "SELECT    2\n")]);
+    sqlfmt()
+        .arg("--threads")
+        .arg("2")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("2 file(s) processed"));
+}
+
+#[test]
+fn test_threads_short_flag() {
+    let dir = setup_temp_dir(&[("query.sql", "SELECT    1\n")]);
+    sqlfmt()
+        .arg("-t")
+        .arg("1")
+        .arg(dir.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_threads_zero_uses_all_cores() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    sqlfmt()
+        .arg("--threads")
+        .arg("0")
+        .arg(dir.path())
+        .assert()
+        .success();
+}
+
 // ─── Idempotency (format twice produces same result) ───
 
 #[test]
