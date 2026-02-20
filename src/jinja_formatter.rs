@@ -515,8 +515,28 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // After ( or [, skip spaces
-            if bytes[i] == b'(' || bytes[i] == b'[' {
+            // Before ( in function calls, remove spaces: "func (" -> "func("
+            if bytes[i] == b'(' {
+                let trimmed_len = result.trim_end().len();
+                if trimmed_len > 0 {
+                    let last_byte = result.as_bytes()[trimmed_len - 1];
+                    if last_byte.is_ascii_alphanumeric()
+                        || last_byte == b'_'
+                        || last_byte == b'.'
+                    {
+                        result.truncate(trimmed_len);
+                    }
+                }
+                result.push('(');
+                i += 1;
+                while i < bytes.len() && bytes[i] == b' ' {
+                    i += 1;
+                }
+                continue;
+            }
+
+            // After [, skip spaces
+            if bytes[i] == b'[' {
                 result.push(bytes[i] as char);
                 i += 1;
                 while i < bytes.len() && bytes[i] == b' ' {
@@ -761,6 +781,24 @@ impl JinjaFormatter {
                 let items = split_by_commas(list_content);
 
                 if items.len() <= 1 {
+                    // Single-item list: try splitting at ~ (tilde) operators
+                    let tilde_parts = split_by_tilde(list_content);
+                    if tilde_parts.len() > 1 {
+                        let indent1 = " ".repeat(base_indent + 4);
+                        let close_indent = " ".repeat(base_indent);
+                        let mut lines = Vec::new();
+                        lines.push(format!("{} {}[", open_delim, before_bracket));
+                        for (i, part) in tilde_parts.iter().enumerate() {
+                            let trimmed_part = part.trim();
+                            if i == 0 {
+                                lines.push(format!("{}{}", indent1, trimmed_part));
+                            } else {
+                                lines.push(format!("{}~ {}", indent1, trimmed_part));
+                            }
+                        }
+                        lines.push(format!("{}] {}", close_indent, close_delim));
+                        return Some(lines.join("\n"));
+                    }
                     return None;
                 }
 
@@ -1013,6 +1051,48 @@ fn split_by_commas(s: &str) -> Vec<String> {
         } else if bytes[i] == b')' || bytes[i] == b']' || bytes[i] == b'}' {
             depth -= 1;
         } else if bytes[i] == b',' && depth == 0 {
+            parts.push(s[start..i].to_string());
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < s.len() {
+        let remaining = s[start..].trim();
+        if !remaining.is_empty() {
+            parts.push(s[start..].to_string());
+        }
+    }
+    parts
+}
+
+/// Split content by top-level `~` (tilde) operators (respecting strings and brackets).
+fn split_by_tilde(s: &str) -> Vec<String> {
+    let bytes = s.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let quote = bytes[i];
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'(' || bytes[i] == b'[' || bytes[i] == b'{' {
+            depth += 1;
+        } else if bytes[i] == b')' || bytes[i] == b']' || bytes[i] == b'}' {
+            depth -= 1;
+        } else if bytes[i] == b'~' && depth == 0 {
             parts.push(s[start..i].to_string());
             start = i + 1;
         }
