@@ -92,12 +92,9 @@ impl JinjaFormatter {
         let inner = inner.trim();
 
         // If already multiline with complex content (triple quotes, dicts),
-        // preserve the structure since we can't safely re-format these
-        if inner.contains('\n')
-            && (inner.contains("\"\"\"")
-                || inner.contains("'''")
-                || inner.contains('{'))
-        {
+        // preserve the structure since we can't safely re-format these.
+        // Only check for { outside string literals ({{ this }} inside a string is fine).
+        if inner.contains('\n') && has_complex_structure_outside_strings(inner) {
             return None;
         }
 
@@ -136,24 +133,40 @@ impl JinjaFormatter {
         let inner = inner.trim();
 
         // If already multiline with complex content (triple quotes, dicts),
-        // preserve the structure
-        if inner.contains('\n')
-            && (inner.contains("\"\"\"")
-                || inner.contains("'''")
-                || inner.contains('{'))
-        {
+        // preserve the structure. Only check for { outside string literals.
+        if inner.contains('\n') && has_complex_structure_outside_strings(inner) {
             return None;
         }
 
-        // Normalize whitespace (collapse internal whitespace, respecting strings)
+        // If originally multiline and no function call or list pattern, preserve
+        // structure. This handles cases like {% extends ... if ... else ... %}
+        // that are intentionally wrapped by the user.
+        if inner.contains('\n')
+            && find_top_level_paren(inner).is_none()
+            && find_top_level_bracket(inner).is_none()
+        {
+            // Preserve multiline with per-line whitespace cleanup but no quote change
+            let cleaned_lines: Vec<&str> = inner
+                .lines()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .collect();
+            let indent = "    ";
+            let mut result = format!("{} \n", open);
+            for line in &cleaned_lines {
+                result.push_str(indent);
+                result.push_str(line);
+                result.push_str(" \n");
+            }
+            result.push_str(close);
+            return Some(result);
+        }
+
+        // Try collapsing to single line
         let normalized = Self::normalize_inner_whitespace(inner);
-        // Normalize quotes (single → double) matching black's behavior
         let normalized = Self::normalize_quotes(&normalized);
-        // Add spaces around operators
         let normalized = Self::add_operator_spaces(&normalized);
-        // Add spaces after commas
         let normalized = Self::add_comma_spaces(&normalized);
-        // Strip spaces inside parens/brackets
         let normalized = Self::strip_paren_spaces(&normalized);
 
         Some(format!("{} {} {}", open, normalized, close))
@@ -234,12 +247,13 @@ impl JinjaFormatter {
     }
 
     /// Add spaces around operators in Jinja content (like black).
-    /// Handles: +, |, ~
+    /// Handles: +, |, ~, = (at depth 0), ==, !=, >=, <=
     /// Does NOT modify operators inside strings.
     fn add_operator_spaces(content: &str) -> String {
         let bytes = content.as_bytes();
         let mut result = String::with_capacity(content.len() + 16);
         let mut i = 0;
+        let mut paren_depth: i32 = 0;
 
         while i < bytes.len() {
             // Skip strings
@@ -264,11 +278,49 @@ impl JinjaFormatter {
                 continue;
             }
 
+            // Track parenthesis depth
+            if bytes[i] == b'(' || bytes[i] == b'[' {
+                paren_depth += 1;
+                result.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+            if bytes[i] == b')' || bytes[i] == b']' {
+                paren_depth -= 1;
+                result.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+
+            // Check for multi-char comparison operators: ==, !=, >=, <=
+            if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
+                let is_comparison = matches!(bytes[i], b'=' | b'!' | b'>' | b'<');
+                if is_comparison {
+                    let trimmed_len = result.trim_end().len();
+                    if trimmed_len > 0 {
+                        result.truncate(trimmed_len);
+                        result.push(' ');
+                    }
+                    result.push(bytes[i] as char);
+                    result.push(b'=' as char);
+                    i += 2;
+                    while i < bytes.len() && bytes[i] == b' ' {
+                        i += 1;
+                    }
+                    if i < bytes.len() && bytes[i] != b')' && bytes[i] != b']' {
+                        result.push(' ');
+                    }
+                    continue;
+                }
+            }
+
             // Check for operators: +, |, ~
             let is_operator = match bytes[i] {
                 b'+' => i + 1 >= bytes.len() || bytes[i + 1] != b'=', // + but not +=
                 b'|' => i + 1 >= bytes.len() || bytes[i + 1] != b'|', // | but not ||
                 b'~' => true,
+                // = at depth 0 is assignment (gets spaces), at depth > 0 is kwarg (no spaces)
+                b'=' => paren_depth == 0 && (i + 1 >= bytes.len() || bytes[i + 1] != b'='),
                 _ => false,
             };
 
@@ -592,6 +644,15 @@ impl JinjaFormatter {
                         lines.push(format!("{}{},", indent2, trimmed_arg));
                     }
                 }
+                // Remove trailing comma for single-arg functions,
+                // or if original didn't have trailing comma
+                if args.len() == 1 {
+                    if let Some(last) = lines.last_mut() {
+                        if last.ends_with(',') {
+                            last.pop();
+                        }
+                    }
+                }
                 lines.push(format!("{})", indent1));
                 let close_indent = " ".repeat(base_indent);
                 lines.push(format!("{}{}", close_indent, close));
@@ -679,8 +740,115 @@ impl JinjaFormatter {
             }
         }
 
+        // Look for list assignment pattern: keyword name = [items]
+        if let Some(bracket_pos) = find_top_level_bracket(inner) {
+            if inner.ends_with(']') {
+                let before_bracket = &inner[..bracket_pos];
+                let list_content = &inner[bracket_pos + 1..inner.len() - 1];
+                let items = split_by_commas(list_content);
+
+                if items.len() <= 1 {
+                    return None;
+                }
+
+                let indent1 = " ".repeat(base_indent + 4);
+                let close_indent = " ".repeat(base_indent);
+
+                let mut lines = Vec::new();
+                lines.push(format!("{} {}[", open_delim, before_bracket));
+                for item in &items {
+                    let trimmed_item = item.trim();
+                    if !trimmed_item.is_empty() {
+                        lines.push(format!("{}{},", indent1, trimmed_item));
+                    }
+                }
+                lines.push(format!("{}] {}", close_indent, close_delim));
+
+                return Some(lines.join("\n"));
+            }
+        }
+
+        // For very long statements without function calls or lists, try wrapping
+        // the statement content at the tag's indentation level
+        if inner.len() + open_delim.len() + close_delim.len() + 4 > self.max_length {
+            let indent1 = " ".repeat(base_indent + 4);
+            let close_indent = " ".repeat(base_indent);
+            return Some(format!(
+                "{} \n{}{}\n{}{}", open_delim, indent1, inner, close_indent, close_delim
+            ));
+        }
+
         None
     }
+}
+
+/// Check if content has complex structure outside of string literals.
+/// Returns true if there are `{`, triple-quoted strings (`"""` or `'''`)
+/// at the top level (not inside string literals). This is used to detect
+/// dict literals, nested templates, etc. that we can't safely reformat.
+fn has_complex_structure_outside_strings(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let quote = bytes[i];
+            // Check for triple quote
+            if i + 2 < bytes.len() && bytes[i + 1] == quote && bytes[i + 2] == quote {
+                // Triple-quoted strings ARE complex structure
+                return true;
+            }
+            // Regular string - skip it entirely
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'{' {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Find the position of the first top-level opening bracket `[`.
+fn find_top_level_bracket(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut paren_depth = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let quote = bytes[i];
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'(' {
+            paren_depth += 1;
+        } else if bytes[i] == b')' {
+            paren_depth -= 1;
+        }
+        if bytes[i] == b'[' && paren_depth == 0 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Find the position of the first top-level opening parenthesis.

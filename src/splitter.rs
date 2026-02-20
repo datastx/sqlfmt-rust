@@ -170,8 +170,14 @@ impl LineSplitter {
         if node.is_opening_bracket() {
             return (true, false);
         }
-        // Always split after opening jinja blocks
+        // Always split after opening jinja blocks ({% if %}, {% for %}).
+        // But for JinjaBlockKeyword ({% else %}, {% elif %}), don't force
+        // split after — let the following content stay on the same line so
+        // the merger can decide (e.g., {% else %} {{ config() }}).
         if node.is_opening_jinja_block() {
+            if node.token.token_type == TokenType::JinjaBlockKeyword {
+                return (false, false);
+            }
             return (true, false);
         }
         // Always split after unterm keywords

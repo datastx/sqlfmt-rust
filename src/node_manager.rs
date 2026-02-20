@@ -472,9 +472,11 @@ impl NodeManager {
             return token.token.to_ascii_lowercase();
         }
 
-        // Jinja quote conversion: single quotes → double quotes inside Jinja tags
+        // Jinja tokens: preserve original text; quote normalization happens
+        // in JinjaFormatter where we can selectively apply it (e.g., skip
+        // multiline-preserved content like {% extends ... else 'default.html' %})
         if tt.is_jinja() {
-            return Self::convert_jinja_quotes(&token.token);
+            return token.token.clone();
         }
 
         token.token.clone()

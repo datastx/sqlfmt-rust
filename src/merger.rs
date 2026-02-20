@@ -80,8 +80,53 @@ impl LineMerger {
                                         if include_end < tail_start {
                                             let inner =
                                                 &only_segment.lines[include_end..tail_start];
-                                            merged_lines
-                                                .extend(self.maybe_merge_lines(inner, arena));
+                                            let merged_inner =
+                                                self.maybe_merge_lines(inner, arena);
+
+                                            // If head is a JinjaBlockKeyword ({% else %},
+                                            // {% elif %}), try to merge it with the first
+                                            // non-blank inner line so we get
+                                            // "{% else %} {{ config() }}" on one line.
+                                            let head_is_jinja_keyword = merged_lines
+                                                .last()
+                                                .and_then(|l| l.first_content_node(arena))
+                                                .map(|n| {
+                                                    n.token.token_type
+                                                        == crate::token::TokenType::JinjaBlockKeyword
+                                                })
+                                                .unwrap_or(false);
+                                            if head_is_jinja_keyword && !merged_lines.is_empty() {
+                                                // Find first non-blank inner line
+                                                let first_content_idx = merged_inner
+                                                    .iter()
+                                                    .position(|l| !l.is_blank_line(arena));
+                                                if let Some(fci) = first_content_idx {
+                                                    let last_head = merged_lines.pop().unwrap();
+                                                    let first_inner = &merged_inner[fci];
+                                                    match self.create_merged_line(
+                                                        &[
+                                                            last_head.clone(),
+                                                            first_inner.clone(),
+                                                        ],
+                                                        arena,
+                                                    ) {
+                                                        Ok(merged) => {
+                                                            merged_lines.extend(merged);
+                                                            merged_lines.extend_from_slice(
+                                                                &merged_inner[fci + 1..],
+                                                            );
+                                                        }
+                                                        Err(_) => {
+                                                            merged_lines.push(last_head);
+                                                            merged_lines.extend(merged_inner);
+                                                        }
+                                                    }
+                                                } else {
+                                                    merged_lines.extend(merged_inner);
+                                                }
+                                            } else {
+                                                merged_lines.extend(merged_inner);
+                                            }
                                             merged_lines.extend_from_slice(
                                                 &only_segment.lines[tail_start..],
                                             );
@@ -155,6 +200,13 @@ impl LineMerger {
         let mut comments = Vec::new();
         let mut final_newline: Option<usize> = None;
         let mut has_multiline_jinja = false;
+        // Track Jinja block nesting depth across merged lines.
+        // When a JinjaBlockEnd is encountered and depth is 0, the matching
+        // JinjaBlockStart is NOT in this merge set, so the block end must
+        // stay on its own line (e.g., {% endif %} after {% else %} content).
+        // When depth > 0, the block start IS in this merge set, so the whole
+        // block can merge onto one line (e.g., {% for %}...{% endfor %}).
+        let mut jinja_block_depth: i32 = 0;
 
         for line in lines {
             // Check unmergeable conditions
@@ -169,6 +221,18 @@ impl LineMerger {
                 }
             }
 
+            // Don't merge a JinjaBlockEnd ({% endif %}, {% endfor %}, etc.)
+            // unless its matching JinjaBlockStart is also being merged.
+            if !nodes.is_empty() {
+                if let Some(first) = line.first_content_node(arena) {
+                    if first.token.token_type == crate::token::TokenType::JinjaBlockEnd
+                        && jinja_block_depth <= 0
+                    {
+                        return Err(ControlFlow::CannotMerge);
+                    }
+                }
+            }
+
             let mut line_has_multiline = false;
             for &node_idx in &line.nodes {
                 let node = &arena[node_idx];
@@ -180,6 +244,13 @@ impl LineMerger {
                 // Can't merge query dividers
                 if node.divides_queries() {
                     return Err(ControlFlow::CannotMerge);
+                }
+
+                // Track jinja block nesting
+                match node.token.token_type {
+                    crate::token::TokenType::JinjaBlockStart => jinja_block_depth += 1,
+                    crate::token::TokenType::JinjaBlockEnd => jinja_block_depth -= 1,
+                    _ => {}
                 }
 
                 if node.is_newline() {

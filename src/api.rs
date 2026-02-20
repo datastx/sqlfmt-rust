@@ -410,8 +410,11 @@ fn normalize_jinja_operators(text: &str) -> String {
             continue;
         }
 
-        // Normalize spacing around +, |, ~
-        if bytes[i] == b'+' || bytes[i] == b'~'
+        // Normalize spacing around +, |, ~, =
+        let is_eq = bytes[i] == b'='
+            && (i + 1 >= bytes.len() || bytes[i + 1] != b'=')
+            && (i == 0 || bytes[i - 1] != b'!' && bytes[i - 1] != b'>' && bytes[i - 1] != b'<');
+        if bytes[i] == b'+' || bytes[i] == b'~' || is_eq
             || (bytes[i] == b'|' && (i + 1 >= bytes.len() || bytes[i + 1] != b'|'))
         {
             // Remove trailing spaces before operator
