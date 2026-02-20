@@ -269,6 +269,27 @@ impl LineMerger {
                 if !starts_with_op && !starts_with_comma {
                     return Err(ControlFlow::CannotMerge);
                 }
+                // If the current line ALSO has multiline Jinja, reject the merge.
+                // Two multiline Jinja expressions on the same logical line is too complex.
+                let current_has_multiline = line
+                    .nodes
+                    .iter()
+                    .any(|&idx| arena[idx].is_multiline_jinja());
+                if current_has_multiline {
+                    return Err(ControlFlow::CannotMerge);
+                }
+            }
+
+            // A line with multiline Jinja shouldn't be merged with preceding
+            // non-multiline content. The multiline content needs its own line.
+            if !nodes.is_empty() && !has_multiline_jinja {
+                let current_has_multiline = line
+                    .nodes
+                    .iter()
+                    .any(|&idx| arena[idx].is_multiline_jinja());
+                if current_has_multiline {
+                    return Err(ControlFlow::CannotMerge);
+                }
             }
 
             // Don't merge a JinjaBlockEnd ({% endif %}, {% endfor %}, etc.)
@@ -279,6 +300,23 @@ impl LineMerger {
                         && jinja_block_depth <= 0
                     {
                         return Err(ControlFlow::CannotMerge);
+                    }
+                }
+            }
+
+            // Don't merge an ON line that contains multiline Jinja with
+            // preceding content. The ON clause with multiline Jinja is too
+            // complex to fit naturally on the same line as the table name.
+            if !nodes.is_empty() {
+                if let Some(first) = line.first_content_node(arena) {
+                    if first.token.token_type == crate::token::TokenType::On {
+                        let line_has_multiline_jinja = line
+                            .nodes
+                            .iter()
+                            .any(|&idx| arena[idx].is_multiline_jinja());
+                        if line_has_multiline_jinja {
+                            return Err(ControlFlow::CannotMerge);
+                        }
                     }
                 }
             }
@@ -475,18 +513,43 @@ impl LineMerger {
                 match first {
                     // ON merges with previous (join condition) — but NOT when
                     // the ON clause has additional AND/OR conditions on subsequent
-                    // lines (those appear as the next segment).
+                    // lines (those appear as the next segment), and NOT when the
+                    // ON segment or the next segment contains multiline Jinja
+                    // (the merged result would be too complex).
                     Some(n) if n.token.token_type == crate::token::TokenType::On => {
-                        // If the next segment starts with a boolean operator (and/or),
-                        // this ON has multi-line conditions — don't merge.
                         if let Some(next) = next_segment {
                             if let Ok((_, next_line)) = next.head(arena) {
                                 if let Some(nn) = next_line.first_content_node(arena) {
+                                    // Don't merge if next segment starts with boolean operator
                                     if nn.is_boolean_operator() {
+                                        return false;
+                                    }
+                                    // Don't merge if next segment starts with a comparison
+                                    // operator (=, >, <, etc.) — means the join condition
+                                    // spans multiple lines
+                                    if nn.is_operator(arena) {
                                         return false;
                                     }
                                 }
                             }
+                            // Don't merge if the next segment has multiline Jinja
+                            let next_has_multiline = next.lines.iter().any(|l| {
+                                l.nodes
+                                    .iter()
+                                    .any(|&idx| arena[idx].is_multiline_jinja())
+                            });
+                            if next_has_multiline {
+                                return false;
+                            }
+                        }
+                        // Don't merge if the ON segment itself contains multiline Jinja
+                        let has_multiline = segment.lines.iter().any(|l| {
+                            l.nodes
+                                .iter()
+                                .any(|&idx| arena[idx].is_multiline_jinja())
+                        });
+                        if has_multiline {
+                            return false;
                         }
                         true
                     }

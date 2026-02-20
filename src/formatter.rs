@@ -34,6 +34,11 @@ impl QueryFormatter {
             self.format_jinja(query, arena);
         }
 
+        // Stage 2b: Re-split lines that now contain multiline Jinja.
+        // The JinjaFormatter may have made single-line expressions multiline,
+        // so split before those multiline nodes.
+        self.split_multiline_jinja(query, arena);
+
         // Stage 3: Dedent Jinja blocks
         self.dedent_jinja_blocks(query, arena);
 
@@ -62,6 +67,121 @@ impl QueryFormatter {
                 formatter.format_line(line, arena);
             }
         }
+    }
+
+    /// Stage 2b: Re-split lines where the JinjaFormatter created multiline nodes.
+    /// After jinja formatting, some nodes may have become multiline. We only split
+    /// when the resulting line exceeds the line length limit. This handles cases like
+    /// `= {{ short_multiline }}` (stays together if it fits) vs
+    /// `= {{ very_long_multiline }}` (gets split because it exceeds the limit).
+    /// Lines starting with ON + multiline Jinja are never split (join conditions).
+    fn split_multiline_jinja(&self, query: &mut Query, arena: &mut Vec<Node>) {
+        let mut new_lines = Vec::new();
+        for line in &query.lines {
+            if line.has_formatting_disabled() {
+                new_lines.push(line.clone());
+                continue;
+            }
+            // Check if a multiline Jinja node needs to be split from preceding content.
+            let mut content_count = 0;
+            let mut multiline_count = 0;
+            let mut first_content_is_on = false;
+            let mut has_multiline = false;
+            let mut first_multiline_pos: Option<usize> = None;
+            for (pos, &idx) in line.nodes.iter().enumerate() {
+                let node = &arena[idx];
+                if node.is_newline() {
+                    continue;
+                }
+                content_count += 1;
+                if content_count == 1 {
+                    first_content_is_on =
+                        node.token.token_type == crate::token::TokenType::On;
+                }
+                if node.is_multiline_jinja() {
+                    multiline_count += 1;
+                    has_multiline = true;
+                    if first_multiline_pos.is_none() && content_count >= 2 {
+                        first_multiline_pos = Some(pos);
+                    }
+                }
+            }
+
+            let mut needs_split = false;
+            if has_multiline && content_count >= 2 {
+                if multiline_count > 1 {
+                    // Multiple multiline Jinja nodes on one line: always split
+                    needs_split = true;
+                } else if first_content_is_on {
+                    // ON + multiline Jinja: never split (join conditions stay together)
+                    needs_split = false;
+                } else {
+                    // Single multiline Jinja with other content: split only if too long
+                    let line_len = line.len(arena);
+                    if line_len > self.line_length {
+                        needs_split = true;
+                    }
+                }
+            }
+
+            if needs_split {
+                if let Some(split_pos) = first_multiline_pos {
+                    // Split the line before the first multiline Jinja node.
+                    let prev_idx = if split_pos > 0 {
+                        Some(line.nodes[split_pos - 1])
+                    } else {
+                        line.previous_node
+                    };
+
+                    // Line 1: nodes before split_pos + newline
+                    let mut line1 = Line::new(line.previous_node);
+                    for &idx in &line.nodes[..split_pos] {
+                        line1.append_node(idx);
+                    }
+                    // Add a newline node for line1 (inherit open_brackets/open_jinja_blocks)
+                    let spos = prev_idx.map(|i| arena[i].token.epos).unwrap_or(0);
+                    let nl_token = crate::token::Token::new(
+                        crate::token::TokenType::Newline, "", "\n", spos, spos,
+                    );
+                    let nl_node = Node::new(
+                        nl_token,
+                        prev_idx,
+                        String::new(),
+                        "\n".to_string(),
+                        prev_idx.map(|i| arena[i].open_brackets.clone()).unwrap_or_default(),
+                        prev_idx.map(|i| arena[i].open_jinja_blocks.clone()).unwrap_or_default(),
+                    );
+                    let nl_idx = arena.len();
+                    arena.push(nl_node);
+                    line1.append_node(nl_idx);
+                    line1.formatting_disabled = line.formatting_disabled.clone();
+
+                    // Line 2: nodes from split_pos onwards (including original newline)
+                    let mut line2 = Line::new(prev_idx);
+                    for &idx in &line.nodes[split_pos..] {
+                        line2.append_node(idx);
+                    }
+                    line2.formatting_disabled = line.formatting_disabled.clone();
+
+                    // Distribute comments
+                    for comment in &line.comments {
+                        if comment.is_standalone {
+                            line2.append_comment(comment.clone());
+                        } else {
+                            line1.append_comment(comment.clone());
+                        }
+                    }
+
+                    new_lines.push(line1);
+                    new_lines.push(line2);
+                } else {
+                    new_lines.push(line.clone());
+                }
+            } else {
+                new_lines.push(line.clone());
+            }
+        }
+        query.lines = new_lines;
     }
 
     /// Stage 3: Adjust indentation of Jinja block start/end to match

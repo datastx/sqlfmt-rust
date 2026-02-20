@@ -81,10 +81,14 @@ impl LineSplitter {
         if node.is_bracket_operator(arena) {
             return false;
         }
-        // Split before multiline jinja
-        if node.is_multiline_jinja() {
-            return true;
-        }
+        // Do NOT split before multiline jinja in Stage 1.
+        // Multiline jinja nodes are created by the JinjaFormatter in Stage 2.
+        // If they need splitting, Stage 2b (split_multiline_jinja) handles it
+        // with length-based checks. Splitting unconditionally here would break
+        // idempotency: in the second pass, already-multiline Jinja would be
+        // split from preceding content (e.g., `= {{ ... }}` or `on {{ ... }}`).
+        // Note: the operator/keyword split rules below will still break lines
+        // at operators and keywords that precede multiline Jinja.
         // Split before any unterm keyword
         if node.is_unterm_keyword() {
             return true;

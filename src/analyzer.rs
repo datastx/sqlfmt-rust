@@ -352,10 +352,26 @@ impl Analyzer {
             }
 
             Action::HandleJinjaBlockKeyword => {
+                // Save the block start's previous_node before popping.
+                // Python sqlfmt sets {% else %}'s previous_node to {% if %}'s
+                // previous_node so get_previous_token resolves to the SQL
+                // context before the entire if/else block.
+                let block_start_prev = self
+                    .node_manager
+                    .open_jinja_blocks
+                    .last()
+                    .and_then(|&idx| self.arena[idx].previous_node);
                 // Pop current jinja block, add keyword, push new block
                 self.node_manager.pop_jinja_block();
                 self.add_node(prefix, token_text, TokenType::JinjaBlockKeyword);
                 let last_idx = self.arena.len() - 1;
+                // Override previous_node to block start's previous_node
+                // so get_previous_token for tokens AFTER {% else %} resolves
+                // to the SQL context before the entire if/else block.
+                // The prefix is always "" for block keywords (handled in compute_prefix).
+                if let Some(bsp) = block_start_prev {
+                    self.arena[last_idx].previous_node = Some(bsp);
+                }
                 self.node_manager.push_jinja_block(last_idx);
                 self.pos += match_len;
             }
@@ -480,6 +496,47 @@ impl Analyzer {
         } else {
             self.previous_node_index()
         };
+
+        // When the buffer is empty but the last flushed line ends with a semicolon
+        // AND the comment is on the SAME LINE (no newline in token prefix),
+        // the comment is inline after that semicolon (e.g., `from table; -- comment`).
+        // Attach it directly to the previous line instead of buffering it as standalone.
+        if is_standalone && !self.line_buffer.is_empty() && !token_text.is_empty() {
+            // Check if the comment is on the same line as the semicolon
+            // by examining the original prefix (text between semicolon and comment)
+            let same_line = !_prefix.contains('\n') && !_prefix.is_empty();
+            if same_line {
+                let last_line = self.line_buffer.last().unwrap();
+                // Check if the last content node in the previous line is a semicolon
+                let has_trailing_semicolon = last_line.nodes.iter().rev().any(|&idx| {
+                    let node = &self.arena[idx];
+                    if node.is_newline() {
+                        false
+                    } else {
+                        node.token.token_type == TokenType::Semicolon
+                    }
+                });
+                if has_trailing_semicolon {
+                    let content_nodes: Vec<usize> = last_line
+                        .nodes
+                        .iter()
+                        .copied()
+                        .filter(|&idx| !self.arena[idx].is_newline())
+                        .collect();
+                    let attach_to = if content_nodes.len() >= 2 {
+                        Some(content_nodes[content_nodes.len() - 2])
+                    } else if !content_nodes.is_empty() {
+                        Some(content_nodes[0])
+                    } else {
+                        prev
+                    };
+                    let comment = Comment::new(token, false, attach_to);
+                    self.line_buffer.last_mut().unwrap().append_comment(comment);
+                    return;
+                }
+            }
+        }
+
         let comment = Comment::new(token, is_standalone, prev);
         self.comment_buffer.push(comment);
     }

@@ -340,8 +340,29 @@ fn normalize_jinja_structure(text: &str) -> String {
             continue;
         }
 
-        // After ( or [, skip spaces
-        if bytes[i] == b'(' || bytes[i] == b'[' {
+        // Before ( in function calls, remove spaces: "func (" -> "func("
+        // This normalizes both `mock_ref ("x")` and `mock_ref("x")` to the same form.
+        if bytes[i] == b'(' {
+            let trimmed_len = result.trim_end().len();
+            if trimmed_len > 0 {
+                let last_byte = result.as_bytes()[trimmed_len - 1];
+                if last_byte.is_ascii_alphanumeric()
+                    || last_byte == b'_'
+                    || last_byte == b'.'
+                {
+                    result.truncate(trimmed_len);
+                }
+            }
+            result.push('(');
+            i += 1;
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // After [, skip spaces
+        if bytes[i] == b'[' {
             result.push(bytes[i] as char);
             i += 1;
             while i < bytes.len() && bytes[i] == b' ' {

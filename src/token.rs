@@ -127,8 +127,17 @@ impl TokenType {
     }
 
     /// Tokens that do not affect the "previous SQL context" for whitespace decisions.
+    /// Matches Python's `does_not_set_prev_sql_context` which includes all jinja
+    /// statement types (block start/keyword/end) plus newlines.
     pub fn does_not_set_prev_sql_context(self) -> bool {
-        matches!(self, Self::Newline | Self::JinjaStatement)
+        matches!(
+            self,
+            Self::Newline
+                | Self::JinjaStatement
+                | Self::JinjaBlockStart
+                | Self::JinjaBlockKeyword
+                | Self::JinjaBlockEnd
+        )
     }
 }
 

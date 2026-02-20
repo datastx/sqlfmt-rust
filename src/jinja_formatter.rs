@@ -652,9 +652,37 @@ impl JinjaFormatter {
                 let args_content = &inner[paren_pos + 1..inner.len() - 1];
                 let args = split_by_commas(args_content);
 
-                if args.len() <= 1 && args.iter().all(|a| a.len() < 40) {
-                    // Single argument or no arguments — keep on one line
-                    return None;
+                if args.len() <= 1 {
+                    // Single argument: check if it's a list literal that needs expanding
+                    let single_arg = args.first().map(|a| a.trim()).unwrap_or("");
+                    if single_arg.starts_with('[') && single_arg.ends_with(']') {
+                        let list_content = &single_arg[1..single_arg.len() - 1];
+                        let list_items = split_by_commas(list_content);
+                        if list_items.len() > 1 {
+                            let indent1 = " ".repeat(base_indent + 4);
+                            let indent2 = " ".repeat(base_indent + 8);
+                            let indent3 = " ".repeat(base_indent + 12);
+                            let close_indent = " ".repeat(base_indent);
+
+                            let mut lines = Vec::new();
+                            lines.push(open.to_string());
+                            lines.push(format!("{}{}(", indent1, func_name));
+                            lines.push(format!("{}[", indent2));
+                            for item in &list_items {
+                                let trimmed_item = item.trim();
+                                if !trimmed_item.is_empty() {
+                                    lines.push(format!("{}{},", indent3, trimmed_item));
+                                }
+                            }
+                            lines.push(format!("{}]", indent2));
+                            lines.push(format!("{})", indent1));
+                            lines.push(format!("{}{}", close_indent, close));
+                            return Some(lines.join("\n"));
+                        }
+                    }
+                    if single_arg.len() < 40 {
+                        return None;
+                    }
                 }
 
                 let indent1 = " ".repeat(base_indent + 4);

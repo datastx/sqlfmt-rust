@@ -198,6 +198,18 @@ impl NodeManager {
         self.open_jinja_blocks.pop();
     }
 
+    /// Recompute the prefix for a node using a different previous_node reference.
+    /// Used for jinja block keywords and block ends where the previous_node
+    /// is overridden to the block start's previous_node (matching Python behavior).
+    pub fn recompute_prefix(
+        &self,
+        token: &Token,
+        previous_node: Option<NodeIndex>,
+        arena: &[Node],
+    ) -> String {
+        self.compute_prefix(token, previous_node, arena).into_owned()
+    }
+
     /// Compute the whitespace prefix for a token.
     /// Mirrors Python's NodeManager.whitespace() exactly.
     fn compute_prefix(
@@ -386,19 +398,17 @@ impl NodeManager {
             return Cow::Borrowed(" ");
         }
 
-        // Jinja: respect original whitespace, except block keywords like {% else %}/{% elif %}
-        // which attach directly to preceding content (no space).
-        // Always add space when a jinja token follows another jinja token
-        // (e.g., {% if condition %} {{ ref("model") }}).
+        // Jinja block keywords ({% else %}, {% elif %}) always attach directly
+        // to preceding content without a space.
+        if tt == TokenType::JinjaBlockKeyword {
+            return Cow::Borrowed("");
+        }
+
+        // Jinja: respect original whitespace. Since does_not_set_prev_sql_context
+        // now skips all jinja statement types (block start/keyword/end),
+        // prev_type here reflects the SQL context before any jinja blocks.
+        // This matches Python's whitespace() logic exactly.
         if tt.is_jinja() {
-            if Self::is_jinja_block_keyword(&token.token) {
-                return Cow::Borrowed("");
-            }
-            if let Some(pt) = prev_type {
-                if pt.is_jinja() {
-                    return Cow::Borrowed(" ");
-                }
-            }
             if !token.prefix.is_empty() || extra_whitespace {
                 return Cow::Borrowed(" ");
             } else {
