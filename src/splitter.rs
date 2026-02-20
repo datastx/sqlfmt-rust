@@ -108,10 +108,18 @@ impl LineSplitter {
             return true;
         }
         // Split before boolean operators (and, or, not) — same as regular operators
-        // but NOT the AND after BETWEEN
+        // but NOT the AND after BETWEEN, and NOT "not" after "or"/"and"
         if node.is_boolean_operator() {
             if node.is_the_and_after_between(arena) {
                 return false;
+            }
+            // "not" after "or"/"and" stays on the same line (e.g., "or not x in ...")
+            if node.value.eq_ignore_ascii_case("not") {
+                if let Some(prev) = node.get_previous_sql_token(arena) {
+                    if prev.token_type == TokenType::BooleanOperator {
+                        return false;
+                    }
+                }
             }
             return true;
         }

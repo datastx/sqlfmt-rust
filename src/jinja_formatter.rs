@@ -41,11 +41,16 @@ impl JinjaFormatter {
             }
         }
 
-        // After normalization, check if any Jinja tags need multiline formatting
+        // After normalization, check if any Jinja tags need multiline formatting.
+        // Also handle "magic trailing comma" — if a list has a trailing comma,
+        // always format as multiline (matching black's behavior).
         for &idx in &line.nodes {
             let node = &arena[idx];
             let line_len = base_indent + node.value.len();
-            if line_len <= self.max_length || node.value.contains('\n') {
+            let has_magic_trailing_comma = has_trailing_comma_in_brackets(&node.value);
+            if (line_len <= self.max_length && !has_magic_trailing_comma)
+                || node.value.contains('\n')
+            {
                 continue;
             }
             match node.token.token_type {
@@ -713,10 +718,6 @@ impl JinjaFormatter {
                 let args_content = &inner[paren_pos + 1..inner.len() - 1];
                 let args = split_by_commas(args_content);
 
-                if args.len() <= 1 {
-                    return None;
-                }
-
                 let indent1 = " ".repeat(base_indent + 4);
 
                 let mut lines = Vec::new();
@@ -728,8 +729,11 @@ impl JinjaFormatter {
                     }
                 }
                 // Last arg: remove trailing comma if the original didn't have one
+                // and there are multiple args (single-arg functions don't get trailing commas)
                 if let Some(last) = lines.last_mut() {
-                    if last.ends_with(',') && !args_content.trim().ends_with(',') {
+                    if last.ends_with(',')
+                        && (args.len() == 1 || !args_content.trim().ends_with(','))
+                    {
                         last.pop(); // remove trailing comma
                     }
                 }
@@ -780,6 +784,43 @@ impl JinjaFormatter {
 
         None
     }
+}
+
+/// Check if a Jinja tag value has a trailing comma inside brackets (parens or square brackets).
+/// This implements "magic trailing comma" behavior from Python's black formatter:
+/// if a list or function call has a trailing comma, it should always be formatted as multiline.
+fn has_trailing_comma_in_brackets(value: &str) -> bool {
+    // Look for ,) or ,] pattern outside of strings
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let quote = bytes[i];
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b',' {
+            // Check if next non-whitespace char is ) or ]
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == b')' || bytes[j] == b']') {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Check if content has complex structure outside of string literals.

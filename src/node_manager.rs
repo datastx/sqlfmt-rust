@@ -386,10 +386,17 @@ impl NodeManager {
         }
 
         // Jinja: respect original whitespace, except block keywords like {% else %}/{% elif %}
-        // which attach directly to preceding content (no space)
+        // which attach directly to preceding content (no space).
+        // Always add space when a jinja token follows another jinja token
+        // (e.g., {% if condition %} {{ ref("model") }}).
         if tt.is_jinja() {
             if Self::is_jinja_block_keyword(&token.token) {
                 return Cow::Borrowed("");
+            }
+            if let Some(pt) = prev_type {
+                if pt.is_jinja() {
+                    return Cow::Borrowed(" ");
+                }
             }
             if !token.prefix.is_empty() || extra_whitespace {
                 return Cow::Borrowed(" ");
