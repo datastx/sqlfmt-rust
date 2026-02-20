@@ -1,4 +1,8 @@
-use crate::node::{Node, NodeIndex};
+use std::borrow::Cow;
+
+use smallvec::SmallVec;
+
+use crate::node::{BracketVec, FmtDisabledVec, JinjaBlockVec, Node, NodeIndex};
 use crate::token::{Token, TokenType};
 
 /// NodeManager creates Nodes from Tokens, tracking bracket depth,
@@ -6,18 +10,18 @@ use crate::token::{Token, TokenType};
 #[derive(Debug, Clone)]
 pub struct NodeManager {
     pub case_sensitive_names: bool,
-    pub open_brackets: Vec<NodeIndex>,
-    pub open_jinja_blocks: Vec<NodeIndex>,
-    pub formatting_disabled: Vec<Token>,
+    pub open_brackets: BracketVec,
+    pub open_jinja_blocks: JinjaBlockVec,
+    pub formatting_disabled: FmtDisabledVec,
 }
 
 impl NodeManager {
     pub fn new(case_sensitive_names: bool) -> Self {
         Self {
             case_sensitive_names,
-            open_brackets: Vec::new(),
-            open_jinja_blocks: Vec::new(),
-            formatting_disabled: Vec::new(),
+            open_brackets: SmallVec::new(),
+            open_jinja_blocks: SmallVec::new(),
+            formatting_disabled: SmallVec::new(),
         }
     }
 
@@ -42,7 +46,7 @@ impl NodeManager {
             // When formatting is disabled, preserve original whitespace and value
             (token.prefix.clone(), token.token.clone())
         } else {
-            let prefix = self.compute_prefix(&token, previous_node, arena);
+            let prefix = self.compute_prefix(&token, previous_node, arena).into_owned();
             let value = self.standardize_value(&token);
             (prefix, value)
         };
@@ -69,10 +73,10 @@ impl NodeManager {
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
-    ) -> (Vec<NodeIndex>, Vec<NodeIndex>) {
+    ) -> (BracketVec, JinjaBlockVec) {
         // NODE's open_brackets: includes unterm keywords for depth
         let (mut node_brackets, mut node_jinja) = match previous_node {
-            None => (Vec::new(), Vec::new()),
+            None => (SmallVec::new(), SmallVec::new()),
             Some(prev_idx) => {
                 let prev = &arena[prev_idx];
                 let mut ob = prev.open_brackets.clone();
@@ -113,7 +117,19 @@ impl NodeManager {
                 node_brackets.pop();
             }
             TokenType::JinjaBlockEnd => {
-                node_jinja.pop();
+                // Pop the jinja block and restore SQL brackets to the state
+                // at the time the jinja block was opened. SQL scope inside a
+                // jinja block doesn't leak out to the closing tag.
+                if let Some(jinja_start_idx) = node_jinja.pop() {
+                    node_brackets = arena[jinja_start_idx].open_brackets.clone();
+                }
+            }
+            TokenType::JinjaBlockKeyword => {
+                // {% else %}, {% elif %}, etc. close the previous block section
+                // and open a new one. Restore SQL brackets to the block start's state.
+                if let Some(jinja_start_idx) = node_jinja.pop() {
+                    node_brackets = arena[jinja_start_idx].open_brackets.clone();
+                }
             }
             TokenType::Semicolon => {
                 node_brackets.clear();
@@ -140,9 +156,9 @@ impl NodeManager {
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
-    ) -> Vec<Token> {
+    ) -> FmtDisabledVec {
         let mut formatting_disabled = match previous_node {
-            None => Vec::new(),
+            None => SmallVec::new(),
             Some(prev_idx) => arena[prev_idx].formatting_disabled.clone(),
         };
 
@@ -189,17 +205,17 @@ impl NodeManager {
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
-    ) -> String {
+    ) -> Cow<'static, str> {
         let tt = token.token_type;
 
         // No prefix for the very first token
         if previous_node.is_none() {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Tokens that are never preceded by a space
         if tt.is_never_preceded_by_space() {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Look at the previous meaningful SQL token (skipping newlines/jinja statements)
@@ -211,7 +227,7 @@ impl NodeManager {
             prev_type,
             Some(TokenType::BracketOpen) | Some(TokenType::DoublColon) | Some(TokenType::Colon)
         ) {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Names/stars preceded by dots or colons are namespaced identifiers — no space
@@ -220,12 +236,12 @@ impl NodeManager {
         if tt.is_possible_name()
             && matches!(prev_type, Some(TokenType::Dot) | Some(TokenType::Colon))
         {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Numbers preceded by colons are simple slices — no space
         if tt == TokenType::Number && prev_type == Some(TokenType::Colon) {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // No space between unary +/- and the following number/dot
@@ -254,7 +270,7 @@ impl NodeManager {
                         ),
                     };
                     if is_unary {
-                        return String::new();
+                        return Cow::Borrowed("");
                     }
                 }
             }
@@ -267,22 +283,56 @@ impl NodeManager {
                 if !prev_node.is_multiplication_star(arena)
                     && token.token.eq_ignore_ascii_case("columns")
                 {
-                    return String::new();
+                    return Cow::Borrowed("");
+                }
+            }
+        }
+
+        // No space between single-char string prefix (r, b, f, u, x, e) and following quoted string
+        // Handles raw strings: r'...', binary strings: b'...', etc.
+        if tt == TokenType::Name && prev_type == Some(TokenType::Name) {
+            if let Some(prev_node) = prev {
+                let pv = &prev_node.value;
+                if pv.len() == 1
+                    && matches!(
+                        pv.as_bytes()[0],
+                        b'r' | b'b' | b'f' | b'u' | b'x' | b'e'
+                            | b'R' | b'B' | b'F' | b'U' | b'X' | b'E'
+                    )
+                    && token.token.starts_with('\'')
+                {
+                    return Cow::Borrowed("");
                 }
             }
         }
 
         // Always a space before keywords/operators/etc. except after open bracket
         if tt.is_preceded_by_space_except_after_open_bracket() {
-            return " ".to_string();
+            return Cow::Borrowed(" ");
         }
 
         // Open brackets with `<` (BQ type definitions like array<int64>)
         if tt == TokenType::BracketOpen && token.token.contains('<') {
+            // No space after array/struct/map (these are type constructors)
+            if let Some(prev_node) = prev {
+                let lv = prev_node.value.to_ascii_lowercase();
+                if lv == "array" || lv == "struct" || lv == "map" {
+                    return Cow::Borrowed("");
+                }
+            }
             if prev_type.is_some() && prev_type != Some(TokenType::BracketOpen) {
-                return " ".to_string();
+                return Cow::Borrowed(" ");
             } else {
-                return String::new();
+                return Cow::Borrowed("");
+            }
+        }
+
+        // "lateral(" — no space (DuckDB/Postgres lateral subquery)
+        if tt == TokenType::BracketOpen && prev_type == Some(TokenType::UntermKeyword) {
+            if let Some(prev_node) = prev {
+                if prev_node.value.eq_ignore_ascii_case("lateral") {
+                    return Cow::Borrowed("");
+                }
             }
         }
 
@@ -303,6 +353,10 @@ impl NodeManager {
             if prev_type == Some(TokenType::Name) {
                 if let Some(prev_node) = prev {
                     let lv = prev_node.value.to_ascii_lowercase();
+                    // Snowflake DDL: before(, at( always need a space
+                    if lv == "before" || lv == "at" {
+                        return Cow::Borrowed(" ");
+                    }
                     if lv == "filter" || lv == "offset" {
                         let (pp, _) =
                             Self::get_previous_token(prev_node.previous_node, arena);
@@ -311,46 +365,62 @@ impl NodeManager {
                                 pp_node.token.token_type,
                                 TokenType::BracketClose | TokenType::StatementEnd
                             ) {
-                                return " ".to_string();
+                                return Cow::Borrowed(" ");
                             }
                         }
                     }
                 }
             }
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Open square brackets after colons are Databricks variant cols
         if tt == TokenType::BracketOpen && token.token == "[" && prev_type == Some(TokenType::Colon)
         {
-            return String::new();
+            return Cow::Borrowed("");
         }
 
         // Need a space before any other open bracket
         if tt == TokenType::BracketOpen {
-            return " ".to_string();
+            return Cow::Borrowed(" ");
         }
 
-        // Jinja: respect original whitespace
+        // Jinja: respect original whitespace, except block keywords like {% else %}/{% elif %}
+        // which attach directly to preceding content (no space)
         if tt.is_jinja() {
+            if Self::is_jinja_block_keyword(&token.token) {
+                return Cow::Borrowed("");
+            }
             if !token.prefix.is_empty() || extra_whitespace {
-                return " ".to_string();
+                return Cow::Borrowed(" ");
             } else {
-                return String::new();
+                return Cow::Borrowed("");
             }
         }
 
         // After a jinja expression, respect original whitespace
         if prev_type == Some(TokenType::JinjaExpression) {
             if !token.prefix.is_empty() || extra_whitespace {
-                return " ".to_string();
+                return Cow::Borrowed(" ");
             } else {
-                return String::new();
+                return Cow::Borrowed("");
             }
         }
 
         // Default: one space
-        " ".to_string()
+        Cow::Borrowed(" ")
+    }
+
+    /// Check if a Jinja statement is a block keyword (else/elif) that should
+    /// attach directly to preceding content without a space.
+    fn is_jinja_block_keyword(token_text: &str) -> bool {
+        let inner = token_text
+            .trim_start_matches("{%-")
+            .trim_start_matches("{%")
+            .trim_end_matches("-%}")
+            .trim_end_matches("%}")
+            .trim();
+        inner == "else" || inner.starts_with("elif ")
     }
 
     /// Walk backward through previous_node links, skipping tokens that
@@ -402,7 +472,69 @@ impl NodeManager {
             return token.token.to_ascii_lowercase();
         }
 
+        // Jinja quote conversion: single quotes → double quotes inside Jinja tags
+        if tt.is_jinja() {
+            return Self::convert_jinja_quotes(&token.token);
+        }
+
         token.token.clone()
+    }
+
+    /// Convert single-quoted strings to double-quoted strings inside Jinja tags.
+    /// Matches Python sqlfmt's jinjafmt behavior (black's quote normalization).
+    fn convert_jinja_quotes(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+        let mut result = Vec::with_capacity(len);
+        let mut i = 0;
+
+        while i < len {
+            if bytes[i] == b'\'' {
+                // Found a single-quoted string. Scan to find the closing quote.
+                let start = i;
+                i += 1;
+                let mut contains_double_quote = false;
+                let mut content_end = None;
+                while i < len {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        if bytes[i + 1] == b'"' {
+                            contains_double_quote = true;
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        contains_double_quote = true;
+                    }
+                    if bytes[i] == b'\'' {
+                        content_end = Some(i);
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+
+                if let Some(end) = content_end {
+                    if contains_double_quote {
+                        // Keep single quotes if content contains double quotes
+                        result.extend_from_slice(&bytes[start..=end]);
+                    } else {
+                        // Convert to double quotes
+                        result.push(b'"');
+                        result.extend_from_slice(&bytes[start + 1..end]);
+                        result.push(b'"');
+                    }
+                } else {
+                    // Unterminated string, keep as-is
+                    result.extend_from_slice(&bytes[start..i]);
+                }
+            } else {
+                result.push(bytes[i]);
+                i += 1;
+            }
+        }
+
+        String::from_utf8(result).unwrap_or_else(|_| text.to_string())
     }
 
     /// Enable formatting (handle fmt:on).

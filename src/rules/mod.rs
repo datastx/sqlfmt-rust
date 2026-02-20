@@ -15,9 +15,111 @@ static MAIN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_main_rules);
 /// Cached compiled jinja rules.
 static JINJA_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_jinja_rules);
 
+/// Cached compiled fmt:off rules.
+static FMT_OFF_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::fmt_off_rules);
+
+/// Cached compiled unsupported DDL rules.
+static UNSUPPORTED_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_unsupported_rules);
+
 /// Get the MAIN rule set, cloned from a cached compiled version.
 pub fn main_rules() -> Vec<Rule> {
     MAIN_RULES.clone()
+}
+
+/// Get the FMT_OFF rule set, cloned from a cached compiled version.
+pub fn fmt_off_rules() -> Vec<Rule> {
+    FMT_OFF_RULES.clone()
+}
+
+/// Get the UNSUPPORTED DDL rule set.
+pub fn unsupported_rules() -> Vec<Rule> {
+    UNSUPPORTED_RULES.clone()
+}
+
+/// Build rules for unsupported DDL passthrough.
+/// These preserve original text as Data tokens (no formatting applied).
+/// Only comments, semicolons, newlines, and Jinja are handled normally.
+fn build_unsupported_rules() -> Vec<Rule> {
+    let mut rules = vec![
+        // Semicolons reset back to main rules
+        Rule::new(
+            "semicolon",
+            350,
+            r"(;)",
+            Action::HandleSemicolon,
+        ),
+        // Line comments
+        Rule::new(
+            "line_comment",
+            300,
+            r"((--|#|//).*)",
+            Action::AddComment,
+        ),
+        // Block comments
+        Rule::new(
+            "block_comment",
+            301,
+            r"(/\*[\s\S]*?\*/)",
+            Action::AddComment,
+        ),
+        // Jinja comments
+        Rule::new(
+            "jinja_comment",
+            110,
+            r"(\{#[\s\S]*?#\})",
+            Action::AddComment,
+        ),
+        // Jinja expressions: {{ ... }}
+        Rule::new(
+            "jinja_expression",
+            115,
+            r"(\{\{-?[\s\S]*?-?\}\})",
+            Action::HandleJinja {
+                token_type: TokenType::JinjaExpression,
+            },
+        ),
+        // Jinja statements: {% ... %}
+        Rule::new(
+            "jinja_statement",
+            120,
+            r"(\{%-?[\s\S]*?-?%\})",
+            Action::HandleJinja {
+                token_type: TokenType::JinjaStatement,
+            },
+        ),
+        // fmt: off
+        Rule::new(
+            "fmt_off",
+            0,
+            r"((--|#)[^\S\n]*fmt:[^\S\n]*off[^\S\n]*)",
+            Action::AddNode {
+                token_type: TokenType::FmtOff,
+            },
+        ),
+        // fmt: on
+        Rule::new(
+            "fmt_on",
+            1,
+            r"((--|#)[^\S\n]*fmt:[^\S\n]*on[^\S\n]*)",
+            Action::AddNode {
+                token_type: TokenType::FmtOn,
+            },
+        ),
+        // Data: everything else up to semicolon or newline
+        // This preserves original text verbatim
+        Rule::new(
+            "unsupported_data",
+            5000,
+            r"([^;\n]+)",
+            Action::AddNode {
+                token_type: TokenType::Data,
+            },
+        ),
+        // Newline
+        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
+    ];
+    rules.sort_by_key(|r| r.priority);
+    rules
 }
 
 /// Build the MAIN rule set used by the Polyglot (default) dialect.
@@ -78,30 +180,29 @@ fn build_main_rules() -> Vec<Rule> {
         },
     ));
 
-    // FROM — uses HandleNonreservedTopLevelKeyword (inside brackets, FROM → Name)
+    // FROM — always UntermKeyword (even inside brackets like CTEs)
+    // Inside function brackets like EXTRACT(day FROM ts), FROM tries to pop the last
+    // unterm keyword but finds `(` (a bracket, not unterm), so depth is preserved.
+    // Inside CTEs like `with cte as (select a from t)`, FROM correctly pops `select`.
     rules.push(Rule::new(
         "unterm_from",
         1045,
         r"(from)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::AddNode {
-                    token_type: TokenType::UntermKeyword,
-                }),
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
             }),
         },
     ));
 
-    // USING — uses HandleNonreservedTopLevelKeyword (inside brackets, USING → Name)
+    // USING — UntermKeyword for proper depth tracking
     rules.push(Rule::new(
         "unterm_using",
         1048,
         r"(using)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::AddNode {
-                    token_type: TokenType::UntermKeyword,
-                }),
+            inner: Box::new(Action::AddNode {
+                token_type: TokenType::UntermKeyword,
             }),
         },
     ));
@@ -128,7 +229,16 @@ fn build_main_rules() -> Vec<Rule> {
         r"global\s+right\s+join",
         r"global\s+full\s+outer\s+join",
         r"global\s+full\s+join",
+        r"global\s+any\s+join",
         r"global\s+join",
+        r"any\s+left\s+outer\s+join",
+        r"any\s+left\s+join",
+        r"any\s+right\s+outer\s+join",
+        r"any\s+right\s+join",
+        r"any\s+inner\s+join",
+        r"any\s+full\s+outer\s+join",
+        r"any\s+full\s+join",
+        r"paste\s+join",
         r"natural\s+full\s+outer\s+join",
         r"natural\s+full\s+join",
         r"natural\s+left\s+outer\s+join",
@@ -151,6 +261,9 @@ fn build_main_rules() -> Vec<Rule> {
         r"full\s+outer\s+join",
         r"full\s+join",
         r"inner\s+join",
+        r"semi\s+join",
+        r"anti\s+join",
+        r"asof\s+left\s+join",
         r"asof\s+join",
         r"positional\s+join",
         r"any\s+join",
@@ -188,8 +301,6 @@ fn build_main_rules() -> Vec<Rule> {
         r"values",
         r"returning",
         r"into",
-        r"pivot",
-        r"unpivot",
         r"match_recognize",
         r"connect",
         r"start\s+with",
@@ -221,11 +332,13 @@ fn build_main_rules() -> Vec<Rule> {
     ));
 
     // ---- Functions that overlap with word operators ----
-    // filter(), isnull(), like(), rlike(), ilike(), offset() before `(` → Name
+    // filter(), isnull(), offset() before `(` → Name (function calls)
+    // Note: like/rlike/ilike are NOT included — they are word operators
+    // that should keep a space before parenthesized arguments.
     rules.push(Rule::new(
         "functions_that_overlap_with_word_operators",
         1099,
-        r"((?:filter|isnull|(?:r|i)?like|offset)\s*\()",
+        r"((?:filter|isnull|offset)\s*\()",
         Action::HandleKeywordBeforeParen {
             token_type: TokenType::Name,
         },
@@ -254,6 +367,7 @@ fn build_main_rules() -> Vec<Rule> {
         r"not\s+regexp",
         r"not\s+exists",
         r"global\s+not\s+in",
+        r"global\s+in",
         r"not\s+in",
         r"is\s+not",
         r"grouping\s+sets",
@@ -303,12 +417,12 @@ fn build_main_rules() -> Vec<Rule> {
         },
     ));
 
-    // ---- Star REPLACE/EXCLUDE (BigQuery) ----
-    // exclude(...) and replace(...) after * → WordOperator
+    // ---- Star EXCEPT/REPLACE/EXCLUDE (BigQuery/Snowflake) ----
+    // except(...), exclude(...) and replace(...) after * → WordOperator
     rules.push(Rule::new(
         "star_replace_exclude",
         1101,
-        r"((?:exclude|replace)\s*\()",
+        r"((?:except|exclude|replace)\s*\()",
         Action::HandleReservedKeyword {
             inner: Box::new(Action::HandleKeywordBeforeParen {
                 token_type: TokenType::WordOperator,
@@ -422,11 +536,9 @@ fn build_main_rules() -> Vec<Rule> {
         "truncate",
         r"rename\s+table",
         "rename",
-        "set",
         "unset",
         "use",
         "execute",
-        "call",
         "begin",
         "commit",
         "rollback",
@@ -477,8 +589,8 @@ fn build_main_rules() -> Vec<Rule> {
         &format!(r"({})\b", ddl_pattern),
         Action::HandleReservedKeyword {
             inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::AddNode {
-                    token_type: TokenType::UntermKeyword,
+                inner: Box::new(Action::LexRuleset {
+                    ruleset_name: "unsupported".to_string(),
                 }),
             }),
         },

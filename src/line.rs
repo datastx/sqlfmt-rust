@@ -1,6 +1,6 @@
 use crate::comment::Comment;
-use crate::node::{Node, NodeIndex};
-use crate::token::{Token, TokenType};
+use crate::node::{FmtDisabledVec, Node, NodeIndex};
+use crate::token::TokenType;
 
 /// A Line is a collection of Nodes intended to be printed on one line,
 /// plus any attached comments.
@@ -9,7 +9,7 @@ pub struct Line {
     pub previous_node: Option<NodeIndex>,
     pub nodes: Vec<NodeIndex>,
     pub comments: Vec<Comment>,
-    pub formatting_disabled: Vec<Token>,
+    pub formatting_disabled: FmtDisabledVec,
 }
 
 impl Line {
@@ -18,12 +18,20 @@ impl Line {
             previous_node,
             nodes: Vec::new(),
             comments: Vec::new(),
-            formatting_disabled: Vec::new(),
+            formatting_disabled: smallvec::SmallVec::new(),
         }
     }
 
     pub fn is_blank_line(&self, arena: &[Node]) -> bool {
         self.nodes.len() == 1 && arena[self.nodes[0]].is_newline() && self.comments.is_empty()
+    }
+
+    /// True if this line consists only of standalone comments (no SQL content).
+    pub fn is_standalone_comment_line(&self, arena: &[Node]) -> bool {
+        self.nodes.len() == 1
+            && arena[self.nodes[0]].is_newline()
+            && !self.comments.is_empty()
+            && self.comments.iter().any(|c| c.is_standalone)
     }
 
     /// Depth of the first non-newline node.
@@ -55,6 +63,10 @@ impl Line {
         if self.is_blank_line(arena) {
             return "\n".to_string();
         }
+        // When formatting is disabled, preserve original whitespace and text
+        if self.has_formatting_disabled() {
+            return self.render_formatting_disabled(arena);
+        }
         let mut result = String::new();
         let mut first_content = true;
         for &idx in &self.nodes {
@@ -71,6 +83,27 @@ impl Line {
                 result.push_str(&node.to_formatted_string());
             }
         }
+        result.push('\n');
+        result
+    }
+
+    /// Render a formatting-disabled line preserving original whitespace.
+    /// Uses the original token prefix and token text from the source.
+    fn render_formatting_disabled(&self, arena: &[Node]) -> String {
+        let mut result = String::new();
+        let mut trailing_ws = String::new();
+        for &idx in &self.nodes {
+            let node = &arena[idx];
+            if node.is_newline() {
+                // Capture any trailing whitespace stored in the newline node's prefix
+                trailing_ws = node.token.prefix.clone();
+                continue;
+            }
+            // Use original token prefix (indentation) and original token text
+            result.push_str(&node.token.prefix);
+            result.push_str(&node.token.token);
+        }
+        result.push_str(&trailing_ws);
         result.push('\n');
         result
     }
@@ -349,8 +382,8 @@ mod tests {
             prev,
             prefix.to_string(),
             value.to_string(),
-            Vec::new(),
-            Vec::new(),
+            smallvec::SmallVec::new(),
+            smallvec::SmallVec::new(),
         ));
         idx
     }
@@ -368,7 +401,7 @@ mod tests {
     fn test_line_depth() {
         let mut arena = Vec::new();
         let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-        arena[idx].open_brackets = vec![99]; // 1 open bracket
+        arena[idx].open_brackets = smallvec::smallvec![99]; // 1 open bracket
         let mut line = Line::new(None);
         line.append_node(idx);
         assert_eq!(line.depth(&arena), (1, 0));
@@ -553,7 +586,7 @@ mod tests {
     fn test_indentation_with_depth() {
         let mut arena = Vec::new();
         let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-        arena[idx].open_brackets = vec![99]; // depth 1
+        arena[idx].open_brackets = smallvec::smallvec![99]; // depth 1
         let mut line = Line::new(None);
         line.append_node(idx);
         assert_eq!(line.indentation(&arena), "    "); // 4 spaces per depth level

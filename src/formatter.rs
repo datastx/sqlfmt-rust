@@ -58,7 +58,9 @@ impl QueryFormatter {
     fn format_jinja(&self, query: &mut Query, arena: &mut [Node]) {
         let formatter = JinjaFormatter::new(self.line_length);
         for line in &mut query.lines {
-            formatter.format_line(line, arena);
+            if !line.has_formatting_disabled() {
+                formatter.format_line(line, arena);
+            }
         }
     }
 
@@ -83,7 +85,7 @@ impl QueryFormatter {
                 })
                 .unwrap_or(false);
 
-            if is_block_start {
+            if is_block_start && !lines[i].has_formatting_disabled() {
                 let start_depth = lines[i].depth(arena);
                 let mut j = i + 1;
                 let mut min_sql_depth = usize::MAX;
@@ -142,20 +144,34 @@ impl QueryFormatter {
     /// Stage 5: Remove extra blank lines.
     /// At depth (0,0): max 2 consecutive blank lines.
     /// At any other depth: max 1 consecutive blank line.
+    /// Also removes blank lines immediately after standalone comment lines
+    /// (Python sqlfmt hoists comments to attach directly to the next statement).
     fn remove_extra_blank_lines(&self, query: &mut Query, arena: &[Node]) {
         let mut new_lines: Vec<Line> = Vec::new();
         let mut consecutive_blanks = 0;
+        let mut after_standalone_comment = false;
 
         for line in &query.lines {
             if line.is_blank_line(arena) {
-                consecutive_blanks += 1;
-                let depth = line.depth(arena);
-                let max_blanks = if depth == (0, 0) { 2 } else { 1 };
-                if consecutive_blanks <= max_blanks {
+                if after_standalone_comment && !line.has_formatting_disabled() {
+                    // Skip blank lines immediately after standalone comment lines
+                    continue;
+                }
+                // Preserve blank lines in formatting-disabled regions
+                if line.has_formatting_disabled() {
+                    consecutive_blanks = 0;
                     new_lines.push(line.clone());
+                } else {
+                    consecutive_blanks += 1;
+                    let depth = line.depth(arena);
+                    let max_blanks = if depth == (0, 0) { 2 } else { 1 };
+                    if consecutive_blanks <= max_blanks {
+                        new_lines.push(line.clone());
+                    }
                 }
             } else {
                 consecutive_blanks = 0;
+                after_standalone_comment = line.is_standalone_comment_line(arena);
                 new_lines.push(line.clone());
             }
         }

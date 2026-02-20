@@ -107,6 +107,14 @@ impl LineSplitter {
             }
             return true;
         }
+        // Split before boolean operators (and, or, not) — same as regular operators
+        // but NOT the AND after BETWEEN
+        if node.is_boolean_operator() {
+            if node.is_the_and_after_between(arena) {
+                return false;
+            }
+            return true;
+        }
         // Split before closing brackets
         if node.is_closing_bracket() {
             return true;
@@ -287,8 +295,8 @@ mod tests {
             prev,
             prefix.to_string(),
             val.to_string(),
-            Vec::new(),
-            Vec::new(),
+            smallvec::SmallVec::new(),
+            smallvec::SmallVec::new(),
         ));
         idx
     }

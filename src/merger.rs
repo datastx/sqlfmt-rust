@@ -292,6 +292,72 @@ impl LineMerger {
         new_segments
     }
 
+    /// Check if a segment should be stubbornly merged with the previous one.
+    /// Handles:
+    /// - JOIN conditions: USING (...) / ON after a join clause
+    /// - LATERAL after a comma in FROM clause
+    ///
+    /// `next_segment` is the segment after this one (if any), used to detect
+    /// multi-line ON clauses (ON followed by AND/OR).
+    fn segment_should_stubbornly_merge(
+        &self,
+        segment: &Segment,
+        prev_segment: &Segment,
+        next_segment: Option<&Segment>,
+        arena: &[Node],
+    ) -> bool {
+        match segment.head(arena) {
+            Err(_) => false,
+            Ok((_, line)) => {
+                let first = line.first_content_node(arena);
+                match first {
+                    // ON merges with previous (join condition) — but NOT when
+                    // the ON clause has additional AND/OR conditions on subsequent
+                    // lines (those appear as the next segment).
+                    Some(n) if n.token.token_type == crate::token::TokenType::On => {
+                        // If the next segment starts with a boolean operator (and/or),
+                        // this ON has multi-line conditions — don't merge.
+                        if let Some(next) = next_segment {
+                            if let Ok((_, next_line)) = next.head(arena) {
+                                if let Some(nn) = next_line.first_content_node(arena) {
+                                    if nn.is_boolean_operator() {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                        true
+                    }
+                    // USING merges only when followed by ( (join condition, not DELETE)
+                    Some(n)
+                        if n.token.token_type == crate::token::TokenType::UntermKeyword
+                            && n.value.eq_ignore_ascii_case("using") =>
+                    {
+                        segment.lines.iter().any(|l| {
+                            l.nodes.iter().any(|&idx| {
+                                arena[idx].token.token_type
+                                    == crate::token::TokenType::BracketOpen
+                            })
+                        })
+                    }
+                    // LATERAL merges with previous when previous ends with comma
+                    // (FROM clause: "from t1, lateral flatten(...)")
+                    Some(n)
+                        if n.token.token_type == crate::token::TokenType::UntermKeyword
+                            && n.value.eq_ignore_ascii_case("lateral") =>
+                    {
+                        prev_segment
+                            .tail(arena)
+                            .ok()
+                            .map(|(_, tail_line)| tail_line.ends_with_comma(arena))
+                            .unwrap_or(false)
+                    }
+                    _ => false,
+                }
+            }
+        }
+    }
+
     /// Check if a segment continues an operator sequence.
     fn segment_continues_operator_sequence(
         &self,
@@ -308,6 +374,9 @@ impl LineMerger {
                     .map(|n| {
                         n.is_operator(arena)
                             && !line.previous_token_is_comma(arena)
+                            // Exclude ON from operator sequences — it's handled
+                            // separately by Phase 3 stubborn merge
+                            && n.token.token_type != crate::token::TokenType::On
                             && OperatorPrecedence::from_node(n, arena) <= max_precedence
                     })
                     .unwrap_or(false);
@@ -375,6 +444,25 @@ impl LineMerger {
                 && Segment::new(self.safe_create_merged_line(&segments[i].lines, arena))
                     .tail_closes_head(arena)
             {
+                new_segments = self.stubbornly_merge(&new_segments, &segments[i], arena);
+            } else {
+                new_segments.push(segments[i].clone());
+            }
+        }
+
+        if new_segments.len() <= 1 {
+            return new_segments;
+        }
+
+        // Phase 3: Stubborn-merge join condition clauses (USING/ON) with
+        // preceding segments. This allows "left join table\nusing (id)" to
+        // merge into "left join table using (id)" when it fits.
+        let segments = new_segments;
+        let mut new_segments = vec![segments[0].clone()];
+        for i in 1..segments.len() {
+            let prev = new_segments.last().unwrap();
+            let next = segments.get(i + 1);
+            if self.segment_should_stubbornly_merge(&segments[i], prev, next, arena) {
                 new_segments = self.stubbornly_merge(&new_segments, &segments[i], arena);
             } else {
                 new_segments.push(segments[i].clone());
@@ -469,8 +557,8 @@ mod tests {
             prev,
             prefix.to_string(),
             val.to_string(),
-            Vec::new(),
-            Vec::new(),
+            smallvec::SmallVec::new(),
+            smallvec::SmallVec::new(),
         ));
         idx
     }
@@ -560,7 +648,7 @@ mod tests {
         // Create a line with formatting disabled
         let a = make_node(&mut arena, TokenType::Name, "a", "");
         arena[a].formatting_disabled =
-            vec![Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11)];
+            smallvec::smallvec![Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11)];
         let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
         let mut disabled_line = Line::new(None);
         disabled_line.append_node(a);

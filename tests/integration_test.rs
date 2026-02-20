@@ -113,7 +113,8 @@ fn test_format_jinja_expression() {
     )
     .unwrap();
     assert!(result.contains("{{ column_name }}"));
-    assert!(result.contains("{{ ref('my_model') }}"));
+    // Jinja formatter normalizes single quotes to double quotes (matching black)
+    assert!(result.contains(r#"{{ ref("my_model") }}"#));
 }
 
 #[test]

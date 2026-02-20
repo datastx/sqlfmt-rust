@@ -83,7 +83,7 @@ pub const JINJA_COMMENT: &str = r"(\{#[\s\S]*?#\})";
 
 /// Comparison operators
 pub const COMPARISON_OPERATORS: &str =
-    r"(<>|!=|>=|<=|=>|<=>|!~\*|!~|~\*|~|>>|<<|->|->>|#>>|#>|\|\||\*\*|[+\-*/%&|^=<>])";
+    r"(<>|!=|==|>=|<=|=>|<=>|!~\*|!~|~\*|~|>>|<<|->|->>|#>>|#>|\|\||\*\*|[+\-*/%&|^=<>])";
 
 /// The star character (needs special handling as it can be SELECT * or multiplication)
 pub const STAR: &str = r"(\*)";

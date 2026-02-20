@@ -169,8 +169,8 @@ mod tests {
             if idx > 0 { Some(idx - 1) } else { None },
             String::new(),
             val.to_string(),
-            Vec::new(),
-            Vec::new(),
+            smallvec::SmallVec::new(),
+            smallvec::SmallVec::new(),
         ));
         idx
     }

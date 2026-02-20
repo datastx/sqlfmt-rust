@@ -133,13 +133,20 @@ pub fn get_matching_paths(paths: &[PathBuf], mode: &Mode) -> Vec<PathBuf> {
     let extensions = mode.sql_extensions();
     let mut result = HashSet::new();
 
+    // Pre-compile glob patterns once instead of per-file
+    let exclude_patterns: Vec<glob::Pattern> = mode
+        .exclude
+        .iter()
+        .filter_map(|p| glob::Pattern::new(p).ok())
+        .collect();
+
     for path in paths {
         if path.is_file() {
             if is_sql_file(path, extensions) {
                 result.insert(path.clone());
             }
         } else if path.is_dir() {
-            collect_sql_files(path, extensions, &mode.exclude, &mut result);
+            collect_sql_files(path, extensions, &exclude_patterns, &mut result);
         }
     }
 
@@ -161,7 +168,7 @@ fn is_sql_file(path: &Path, extensions: &[&str]) -> bool {
 fn collect_sql_files(
     dir: &Path,
     extensions: &[&str],
-    exclude: &[String],
+    exclude_patterns: &[glob::Pattern],
     result: &mut HashSet<PathBuf>,
 ) {
     let entries = match std::fs::read_dir(dir) {
@@ -180,16 +187,12 @@ fn collect_sql_files(
         if name.starts_with('.') {
             continue;
         }
-        if exclude.iter().any(|pattern| {
-            glob::Pattern::new(pattern)
-                .map(|p| p.matches(&name))
-                .unwrap_or(false)
-        }) {
+        if exclude_patterns.iter().any(|p| p.matches(&name)) {
             continue;
         }
 
         if path.is_dir() {
-            collect_sql_files(&path, extensions, exclude, result);
+            collect_sql_files(&path, extensions, exclude_patterns, result);
         } else if is_sql_file(&path, extensions) {
             result.insert(path);
         }
@@ -242,9 +245,9 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
         // Compare token text (case-insensitive for keywords)
         let t1 = n1.token.token.to_lowercase();
         let t2 = n2.token.token.to_lowercase();
-        // Normalize whitespace for multi-word tokens
-        let t1_norm: String = t1.split_whitespace().collect::<Vec<_>>().join(" ");
-        let t2_norm: String = t2.split_whitespace().collect::<Vec<_>>().join(" ");
+        // Normalize whitespace for multi-word tokens and Jinja delimiters
+        let t1_norm = normalize_token_text(&t1, n1.token.token_type);
+        let t2_norm = normalize_token_text(&t2, n2.token.token_type);
         if t1_norm != t2_norm {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token text mismatch at position {}: original '{}', formatted '{}'",
@@ -254,6 +257,107 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
     }
 
     Ok(())
+}
+
+/// Normalize token text for equivalence comparison.
+/// For Jinja tokens, strip delimiters and normalize all internal whitespace
+/// so that `{{foo}}`, `{{ foo }}`, and multi-line Jinja tokens compare
+/// as equivalent when their content is semantically the same.
+fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> String {
+    use crate::token::TokenType;
+    match token_type {
+        TokenType::JinjaExpression => {
+            // Strip {{ / }} (and optional - for whitespace control)
+            let inner = text
+                .trim_start_matches("{{-")
+                .trim_start_matches("{{")
+                .trim_end_matches("-}}")
+                .trim_end_matches("}}");
+            // Normalize all internal whitespace (including newlines) and quotes
+            let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
+            let normalized = normalized.replace('\'', "\"");
+            // Normalize operator spacing (+ | ~) so a+b and a + b compare equal
+            let normalized = normalize_jinja_operators(&normalized);
+            format!("{{{{ {} }}}}", normalized)
+        }
+        TokenType::JinjaStatement
+        | TokenType::JinjaBlockStart
+        | TokenType::JinjaBlockEnd
+        | TokenType::JinjaBlockKeyword => {
+            // Strip {% / %} (and optional -)
+            let inner = text
+                .trim_start_matches("{%-")
+                .trim_start_matches("{%")
+                .trim_end_matches("-%}")
+                .trim_end_matches("%}");
+            // Normalize all internal whitespace (including newlines) and quotes
+            let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
+            let normalized = normalized.replace('\'', "\"");
+            format!("{{% {} %}}", normalized)
+        }
+        _ => {
+            // General whitespace normalization for multi-word tokens
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+    }
+}
+
+/// Normalize operator spacing inside Jinja content for equivalence comparison.
+/// Ensures `a+b`, `a +b`, `a+ b`, and `a + b` all compare equal.
+fn normalize_jinja_operators(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut result = String::with_capacity(text.len() + 16);
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Skip strings
+        if bytes[i] == b'"' {
+            result.push('"');
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'"' {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    result.push(bytes[i] as char);
+                    result.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+            if i < bytes.len() {
+                result.push('"');
+                i += 1;
+            }
+            continue;
+        }
+
+        // Normalize spacing around +, |, ~
+        if bytes[i] == b'+' || bytes[i] == b'~'
+            || (bytes[i] == b'|' && (i + 1 >= bytes.len() || bytes[i + 1] != b'|'))
+        {
+            // Remove trailing spaces before operator
+            while result.ends_with(' ') && !result.ends_with("  ") {
+                // Keep at most the space that was there
+                break;
+            }
+            let trimmed = result.trim_end();
+            let trimmed_len = trimmed.len();
+            result.truncate(trimmed_len);
+            result.push(' ');
+            result.push(bytes[i] as char);
+            result.push(' ');
+            i += 1;
+            // Skip whitespace after operator
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            continue;
+        }
+
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
 }
 
 /// Print a diff between original and formatted content.

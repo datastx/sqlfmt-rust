@@ -20,11 +20,11 @@ use crate::token::TokenType;
 /// Build the ALWAYS rules — applied in every context.
 pub fn always_rules() -> Vec<Rule> {
     vec![
-        // fmt: off
+        // fmt: off (use [^\S\n] instead of \s to avoid consuming newlines)
         Rule::new(
             "fmt_off",
             0,
-            r"((--|#)\s*fmt:\s*off\s*)",
+            r"((--|#)[^\S\n]*fmt:[^\S\n]*off[^\S\n]*)",
             Action::AddNode {
                 token_type: TokenType::FmtOff,
             },
@@ -33,7 +33,7 @@ pub fn always_rules() -> Vec<Rule> {
         Rule::new(
             "fmt_on",
             1,
-            r"((--|#)\s*fmt:\s*on\s*)",
+            r"((--|#)[^\S\n]*fmt:[^\S\n]*on[^\S\n]*)",
             Action::AddNode {
                 token_type: TokenType::FmtOn,
             },
@@ -54,7 +54,135 @@ pub fn always_rules() -> Vec<Rule> {
                 token_type: TokenType::JinjaExpression,
             },
         ),
-        // Jinja statement: {% ... %}
+        // Jinja block tags: specific patterns matched BEFORE the generic jinja_statement.
+        // These enable Jinja block indentation tracking (open_jinja_blocks depth).
+        // {% set x %} (block set - no = sign)
+        Rule::new(
+            "jinja_set_block_start",
+            116,
+            r"(\{%-?\s*set\s+[^=]+?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endset %}
+        Rule::new(
+            "jinja_endset",
+            116,
+            r"(\{%-?\s*endset\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% if ... %}
+        Rule::new(
+            "jinja_if_block_start",
+            117,
+            r"(\{%-?\s*if\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% elif ... %}
+        Rule::new(
+            "jinja_elif",
+            117,
+            r"(\{%-?\s*elif\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockKeyword,
+        ),
+        // {% else %}
+        Rule::new(
+            "jinja_else",
+            117,
+            r"(\{%-?\s*else\s*-?%\})",
+            Action::HandleJinjaBlockKeyword,
+        ),
+        // {% endif %}
+        Rule::new(
+            "jinja_endif",
+            117,
+            r"(\{%-?\s*endif\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% for ... %}
+        Rule::new(
+            "jinja_for_block_start",
+            118,
+            r"(\{%-?\s*for\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endfor %}
+        Rule::new(
+            "jinja_endfor",
+            118,
+            r"(\{%-?\s*endfor\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% macro ... %}
+        Rule::new(
+            "jinja_macro_start",
+            118,
+            r"(\{%-?\s*macro\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endmacro %}
+        Rule::new(
+            "jinja_endmacro",
+            118,
+            r"(\{%-?\s*endmacro\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% test ... %}
+        Rule::new(
+            "jinja_test_start",
+            118,
+            r"(\{%-?\s*test\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endtest %}
+        Rule::new(
+            "jinja_endtest",
+            118,
+            r"(\{%-?\s*endtest\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% snapshot ... %}
+        Rule::new(
+            "jinja_snapshot_start",
+            119,
+            r"(\{%-?\s*snapshot\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endsnapshot %}
+        Rule::new(
+            "jinja_endsnapshot",
+            119,
+            r"(\{%-?\s*endsnapshot\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% call ... %}
+        Rule::new(
+            "jinja_call_start",
+            119,
+            r"(\{%-?\s*call(?:\(.*?\))?\s+\w+[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endcall %}
+        Rule::new(
+            "jinja_endcall",
+            119,
+            r"(\{%-?\s*endcall\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // {% materialization ... %}
+        Rule::new(
+            "jinja_materialization_start",
+            119,
+            r"(\{%-?\s*materialization\b[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // {% endmaterialization %}
+        Rule::new(
+            "jinja_endmaterialization",
+            119,
+            r"(\{%-?\s*endmaterialization\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // Jinja statement: {% ... %} (generic fallback for all other {% %} tags)
         Rule::new(
             "jinja_statement",
             120,
@@ -178,16 +306,18 @@ pub fn core_rules() -> Vec<Rule> {
             Action::HandleNumber,
         ),
         // Decimal numbers (with optional Spark suffix)
+        // No \b required — the dot naturally separates from identifiers,
+        // and this handles trailing-dot decimals like "123." (Spark syntax).
         Rule::new(
             "decimal_number",
             402,
-            r"(\d[\d_]*\.[\d_]*(?:bd|d|f)?)\b",
+            r"(\d[\d_]*\.[\d_]*(?:bd|d|f)?)",
             Action::HandleNumber,
         ),
         // Integer numbers
         Rule::new(
             "integer_number",
-            403,
+            404,
             r"(\d[\d_]*)\b",
             Action::HandleNumber,
         ),
@@ -324,7 +454,7 @@ pub fn core_rules() -> Vec<Rule> {
         Rule::new(
             "compound_operator",
             785,
-            r"(>=|=>|>>|<>|<=|<=>|!=|<<|->->|->|->>|<->|@-@|<#>|@>|<@|@@|\?\||\?&|-\|-|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*|!!=|%%)",
+            r"(>=|=>|>>|<>|<=|<=>|!=|==|<<|->->|->|->>|<->|@-@|<#>|@>|<@|@@|\?\||\?&|-\|-|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*|!!=|%%)",
             Action::AddNode {
                 token_type: TokenType::Operator,
             },
@@ -377,6 +507,33 @@ pub fn core_rules() -> Vec<Rule> {
     ]);
 
     rules
+}
+
+/// Build the FMT_OFF rules — applied when `-- fmt: off` is active.
+/// Only matches `-- fmt: on` to re-enable, otherwise treats all content as Data.
+pub fn fmt_off_rules() -> Vec<Rule> {
+    vec![
+        // fmt: on (exits fmt:off mode)
+        Rule::new(
+            "fmt_on",
+            1,
+            r"((--|#)[^\S\n]*fmt:[^\S\n]*on[^\S\n]*)",
+            Action::AddNode {
+                token_type: TokenType::FmtOn,
+            },
+        ),
+        // Data: everything else up to newline (preserves original text verbatim)
+        Rule::new(
+            "data",
+            5000,
+            r"([^\n]+)",
+            Action::AddNode {
+                token_type: TokenType::Data,
+            },
+        ),
+        // Newline
+        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
+    ]
 }
 
 #[cfg(test)]

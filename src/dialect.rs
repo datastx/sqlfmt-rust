@@ -31,16 +31,14 @@ impl Dialect for Polyglot {
     }
 }
 
-/// ClickHouse dialect: same rules as Polyglot but with case-sensitive names.
+/// ClickHouse dialect: same rules as Polyglot.
+/// Note: ClickHouse identifiers are technically case-sensitive at the engine level,
+/// but Python sqlfmt lowercases them like all other dialects.
 pub struct ClickHouse;
 
 impl Dialect for ClickHouse {
     fn get_rules(&self) -> Vec<Rule> {
         rules::main_rules()
-    }
-
-    fn case_sensitive_names(&self) -> bool {
-        true
     }
 }
 
@@ -77,9 +75,9 @@ mod tests {
     }
 
     #[test]
-    fn test_clickhouse_case_sensitive() {
+    fn test_clickhouse_dialect() {
         let dialect = ClickHouse;
-        assert!(dialect.case_sensitive_names());
+        assert!(!dialect.case_sensitive_names());
     }
 
     #[test]

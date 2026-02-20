@@ -91,8 +91,10 @@ impl OperatorPrecedence {
             "**" => Self::Exponent,
             "*" | "/" | "%" | "||" => Self::Multiplication,
             "+" | "-" => Self::Addition,
-            "=" | "!=" | "<>" | "<" | ">" | "<=" | ">=" | "<=>" | "~" | "!~" | "~*" | "!~*"
-            | "@>" | "<@" | "@@" | "<->" | "!!" | "&&" | "?|" | "?&" | "-|-" => Self::Comparators,
+            "=" | "==" | "!=" | "<>" | "<" | ">" | "<=" | ">=" | "<=>" | "~" | "!~" | "~*"
+            | "!~*" | "@>" | "<@" | "@@" | "<->" | "!!" | "&&" | "?|" | "?&" | "-|-" => {
+                Self::Comparators
+            }
             _ => Self::Other,
         }
     }
@@ -110,8 +112,8 @@ mod tests {
             None,
             String::new(),
             value.to_string(),
-            Vec::new(),
-            Vec::new(),
+            smallvec::SmallVec::new(),
+            smallvec::SmallVec::new(),
         )
     }
 

@@ -1,7 +1,15 @@
+use smallvec::SmallVec;
+
 use crate::token::{Token, TokenType};
 
 /// Index into the node arena (Vec<Node>).
 pub type NodeIndex = usize;
+
+/// SmallVec type aliases for Node fields that are almost always small.
+/// These avoid heap allocation for the common case (0-8 elements).
+pub type BracketVec = SmallVec<[NodeIndex; 8]>;
+pub type JinjaBlockVec = SmallVec<[NodeIndex; 4]>;
+pub type FmtDisabledVec = SmallVec<[Token; 2]>;
 
 /// A Node wraps a Token with formatting metadata: depth, open brackets,
 /// open Jinja blocks, and a link to the previous node.
@@ -11,9 +19,9 @@ pub struct Node {
     pub previous_node: Option<NodeIndex>,
     pub prefix: String,
     pub value: String,
-    pub open_brackets: Vec<NodeIndex>,
-    pub open_jinja_blocks: Vec<NodeIndex>,
-    pub formatting_disabled: Vec<Token>,
+    pub open_brackets: BracketVec,
+    pub open_jinja_blocks: JinjaBlockVec,
+    pub formatting_disabled: FmtDisabledVec,
 }
 
 impl Node {
@@ -22,8 +30,8 @@ impl Node {
         previous_node: Option<NodeIndex>,
         prefix: String,
         value: String,
-        open_brackets: Vec<NodeIndex>,
-        open_jinja_blocks: Vec<NodeIndex>,
+        open_brackets: BracketVec,
+        open_jinja_blocks: JinjaBlockVec,
     ) -> Self {
         Self {
             token,
@@ -32,7 +40,7 @@ impl Node {
             value,
             open_brackets,
             open_jinja_blocks,
-            formatting_disabled: Vec::new(),
+            formatting_disabled: SmallVec::new(),
         }
     }
 
@@ -251,8 +259,8 @@ mod tests {
             prev,
             String::new(),
             value.to_string(),
-            Vec::new(),
-            Vec::new(),
+            SmallVec::new(),
+            SmallVec::new(),
         )
     }
 
@@ -265,8 +273,8 @@ mod tests {
     #[test]
     fn test_depth_with_brackets() {
         let mut node = make_node(TokenType::Name, "foo", None);
-        node.open_brackets = vec![0, 1];
-        node.open_jinja_blocks = vec![2];
+        node.open_brackets = smallvec::smallvec![0, 1];
+        node.open_jinja_blocks = smallvec::smallvec![2];
         assert_eq!(node.depth(), (2, 1));
     }
 

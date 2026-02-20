@@ -23,6 +23,10 @@ pub struct Analyzer {
     /// When true, the next HandleNewline should not create a blank line.
     /// Set after HandleSemicolon and HandleSetOperator which already flush.
     suppress_next_newline: bool,
+    /// Trailing whitespace captured from HandleNewline's prefix.
+    /// Stored in the newline node's token prefix so formatting-disabled
+    /// lines can preserve trailing whitespace before newlines.
+    trailing_whitespace: String,
 }
 
 impl Analyzer {
@@ -37,14 +41,19 @@ impl Analyzer {
             arena: Vec::new(),
             pos: 0,
             suppress_next_newline: false,
+            trailing_whitespace: String::new(),
         }
     }
 
     /// Main entry point: parse source string into a Query.
     pub fn parse_query(&mut self, source: &str) -> Result<Query, SqlfmtError> {
+        // Pre-lex validation: check for unmatched comment markers
+        Self::validate_comment_markers(source)?;
         self.clear_buffers();
         self.lex(source)?;
         self.flush_line_buffer();
+        // Post-lex validation: check for unmatched brackets
+        self.validate_brackets()?;
         Ok(self.build_query(source))
     }
 
@@ -57,44 +66,98 @@ impl Analyzer {
     }
 
     /// Try each rule in priority order; execute the first match.
+    /// Split into two phases to avoid cloning the entire Vec<Rule> per token:
+    /// 1. Match phase: immutable borrow of rule_stack to find match + extract strings
+    /// 2. Execute phase: mutable borrow of self to process the match
     fn lex_one(&mut self, source: &str) -> Result<(), SqlfmtError> {
         let remaining = &source[self.pos..];
         if remaining.is_empty() {
             return Ok(());
         }
 
-        let rules = self.rule_stack.last().unwrap().clone();
-        for rule in &rules {
-            if let Some(captures) = rule.pattern.captures(remaining) {
-                self.execute_action(&rule.action, &captures, source)?;
-                return Ok(());
+        // Phase 1: Find matching rule (immutable borrow of rule_stack)
+        let match_result = {
+            let rules = self.rule_stack.last().unwrap();
+            let mut found = None;
+            for rule in rules {
+                if let Some(captures) = rule.pattern.captures(remaining) {
+                    let full_match_str = captures.get(0).unwrap().as_str().to_string();
+                    let prefix = captures
+                        .get(1)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default();
+                    let token_text = captures
+                        .get(2)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default();
+                    let action = rule.action.clone();
+                    found = Some((full_match_str, prefix, token_text, action));
+                    break;
+                }
             }
-        }
+            found
+        };
 
-        Err(SqlfmtError::Parsing {
-            position: self.pos,
-            message: format!(
-                "No rule matched near: {:?}",
-                &remaining[..remaining.len().min(40)]
-            ),
-        })
+        // Phase 2: Execute the action (mutable borrow of self)
+        match match_result {
+            Some((full_match_str, prefix, token_text, action)) => {
+                self.execute_action(&action, &full_match_str, &prefix, &token_text, source)
+            }
+            None => Err(SqlfmtError::Parsing {
+                position: self.pos,
+                message: format!(
+                    "No rule matched near: {:?}",
+                    &remaining[..remaining.len().min(40)]
+                ),
+            }),
+        }
     }
 
     /// Dispatch an action based on what the rule matched.
     fn execute_action(
         &mut self,
         action: &Action,
-        captures: &regex::Captures,
+        full_match_str: &str,
+        prefix: &str,
+        token_text: &str,
         _source: &str,
     ) -> Result<(), SqlfmtError> {
-        let full_match = captures.get(0).unwrap();
-        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
-        let token_text = captures.get(2).map(|m| m.as_str()).unwrap_or("");
-        let match_len = full_match.as_str().len();
+        let match_len = full_match_str.len();
 
         match action {
             Action::AddNode { token_type } => {
+                // Special case: >> inside angle brackets should be two closing brackets
+                if *token_type == TokenType::Operator && token_text == ">>" {
+                    let open_angle_count = self
+                        .node_manager
+                        .open_brackets
+                        .iter()
+                        .filter(|&&idx| self.arena[idx].value == "<")
+                        .count();
+                    if open_angle_count >= 2 {
+                        // Split >> into two > BracketClose tokens
+                        self.add_node(prefix, ">", TokenType::BracketClose);
+                        self.node_manager.open_brackets.pop();
+                        self.add_node("", ">", TokenType::BracketClose);
+                        self.node_manager.open_brackets.pop();
+                        self.pos += match_len;
+                        return Ok(());
+                    } else if open_angle_count == 1 {
+                        // First > closes bracket, second > is operator
+                        self.add_node(prefix, ">", TokenType::BracketClose);
+                        self.node_manager.open_brackets.pop();
+                        self.add_node("", ">", TokenType::Operator);
+                        self.pos += match_len;
+                        return Ok(());
+                    }
+                }
                 self.add_node(prefix, token_text, *token_type);
+                // Switch rule sets on fmt:off/on
+                if *token_type == TokenType::FmtOff {
+                    self.push_rules(crate::rules::fmt_off_rules());
+                } else if *token_type == TokenType::FmtOn {
+                    self.pop_rules();
+                }
                 self.pos += match_len;
             }
 
@@ -149,7 +212,11 @@ impl Analyzer {
                 if self.suppress_next_newline {
                     self.suppress_next_newline = false;
                 } else {
+                    // Store trailing whitespace from this newline match
+                    // (prefix captures whitespace between last token and newline)
+                    self.trailing_whitespace = prefix.to_string();
                     self.flush_line_buffer();
+                    self.trailing_whitespace.clear();
                 }
                 self.pos += match_len;
             }
@@ -184,7 +251,7 @@ impl Analyzer {
                     self.add_node(prefix, token_text, TokenType::Name);
                     self.pos += match_len;
                 } else {
-                    self.execute_action(inner, captures, _source)?;
+                    self.execute_action(inner, full_match_str, prefix, token_text, _source)?;
                 }
             }
 
@@ -194,7 +261,7 @@ impl Analyzer {
                     self.add_node(prefix, token_text, TokenType::Name);
                     self.pos += match_len;
                 } else {
-                    self.execute_action(inner, captures, _source)?;
+                    self.execute_action(inner, full_match_str, prefix, token_text, _source)?;
                 }
             }
 
@@ -256,22 +323,56 @@ impl Analyzer {
             }
 
             Action::HandleJinja { token_type } => {
-                self.add_node(prefix, token_text, *token_type);
-                self.pos += match_len;
+                if *token_type == TokenType::JinjaExpression {
+                    // Use depth-aware scanning for {{ }} to handle nested {{ }}
+                    let remaining = &_source[self.pos..];
+                    let prefix_len = prefix.len();
+                    let tag_start = &remaining[prefix_len..];
+                    if let Some(tag_len) = Self::find_jinja_expr_end(tag_start) {
+                        let full_text = &tag_start[..tag_len];
+                        self.add_node(prefix, full_text, *token_type);
+                        self.pos += prefix_len + tag_len;
+                    } else {
+                        // Fallback: use regex match
+                        self.add_node(prefix, token_text, *token_type);
+                        self.pos += match_len;
+                    }
+                } else {
+                    self.add_node(prefix, token_text, *token_type);
+                    self.pos += match_len;
+                }
             }
 
             Action::HandleKeywordBeforeParen { token_type } => {
                 // The matched text includes the trailing `(`, but we only consume the keyword.
                 // Strip trailing `(` and any whitespace before it to get the keyword.
                 let keyword = token_text.trim_end_matches('(').trim_end();
-                self.add_node(prefix, keyword, *token_type);
+
+                // For star modifiers (except/exclude/replace): only use WordOperator
+                // when preceded by Star. Otherwise it's a function call → Name.
+                let effective_type = if *token_type == TokenType::WordOperator
+                    && self.get_prev_sql_type() != Some(TokenType::Star)
+                {
+                    TokenType::Name
+                } else {
+                    *token_type
+                };
+
+                self.add_node(prefix, keyword, effective_type);
                 // Only advance past prefix + keyword (leave `(` for bracket_open)
                 self.pos += prefix.len() + keyword.len();
             }
 
-            Action::LexRuleset { ruleset_name: _ } => {
-                // For now, treat as UntermKeyword and advance
-                self.add_node(prefix, token_text, TokenType::UntermKeyword);
+            Action::LexRuleset { ruleset_name } => {
+                // Push the alternate ruleset and add the keyword as Data
+                // (preserves original text). The ruleset stays active until
+                // a semicolon is hit, which pops the stack.
+                let ruleset = match ruleset_name.as_str() {
+                    "unsupported" => crate::rules::unsupported_rules(),
+                    _ => crate::rules::unsupported_rules(), // default fallback
+                };
+                self.add_node(prefix, token_text, TokenType::Data);
+                self.push_rules(ruleset);
                 self.pos += match_len;
             }
         }
@@ -317,14 +418,24 @@ impl Analyzer {
             // Still create a newline-only line if we have nothing
             let prev = self.previous_node_index();
 
-            // Create a newline node
-            let token = Token::new(TokenType::Newline, "", "\n", self.pos, self.pos + 1);
+            // Create a newline node (include trailing whitespace for fmt:off regions)
+            let token = Token::new(
+                TokenType::Newline,
+                &self.trailing_whitespace,
+                "\n",
+                self.pos,
+                self.pos + 1,
+            );
             let node = self.node_manager.create_node(token, prev, &self.arena);
             let idx = self.arena.len();
             self.arena.push(node);
 
             let mut line = Line::new(prev);
             line.append_node(idx);
+            // Propagate formatting_disabled from newline node
+            if !self.arena[idx].formatting_disabled.is_empty() {
+                line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
+            }
             self.line_buffer.push(line);
             return;
         }
@@ -342,13 +453,27 @@ impl Analyzer {
             line.append_node(idx);
         }
 
+        // Propagate formatting_disabled from first content node with it set
+        for &idx in &self.node_buffer {
+            if !self.arena[idx].formatting_disabled.is_empty() {
+                line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
+                break;
+            }
+        }
+
         // Add a newline node at the END (mirrors Python behavior)
         let nl_prev = self
             .node_buffer
             .last()
             .copied()
             .or_else(|| self.previous_node_index());
-        let nl_token = Token::new(TokenType::Newline, "", "\n", self.pos, self.pos + 1);
+        let nl_token = Token::new(
+            TokenType::Newline,
+            &self.trailing_whitespace,
+            "\n",
+            self.pos,
+            self.pos + 1,
+        );
         let nl_node = self
             .node_manager
             .create_node(nl_token, nl_prev, &self.arena);
@@ -395,6 +520,7 @@ impl Analyzer {
         self.arena.clear();
         self.pos = 0;
         self.suppress_next_newline = false;
+        self.trailing_whitespace.clear();
         self.node_manager.reset();
     }
 
@@ -405,6 +531,212 @@ impl Analyzer {
             self.line_length,
             std::mem::take(&mut self.line_buffer),
         )
+    }
+
+    /// Find the end of a `{{ }}` Jinja expression with depth tracking.
+    /// Handles nested `{{ }}` and skips strings. Returns the byte length
+    /// of the full expression (from `{{` to matching `}}`), or None if unmatched.
+    fn find_jinja_expr_end(text: &str) -> Option<usize> {
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+        if len < 4 || bytes[0] != b'{' || bytes[1] != b'{' {
+            return None;
+        }
+
+        let mut i = 2;
+        // Skip optional `-` (for {{-)
+        if i < len && bytes[i] == b'-' {
+            i += 1;
+        }
+
+        let mut depth = 1;
+        while i < len && depth > 0 {
+            // Skip strings
+            if bytes[i] == b'\'' || bytes[i] == b'"' {
+                let quote = bytes[i];
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Check for nested {{ open
+            if i + 1 < len && bytes[i] == b'{' && bytes[i + 1] == b'{' {
+                depth += 1;
+                i += 2;
+                continue;
+            }
+
+            // Check for -}} close
+            if i + 2 < len && bytes[i] == b'-' && bytes[i + 1] == b'}' && bytes[i + 2] == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 3);
+                }
+                i += 3;
+                continue;
+            }
+
+            // Check for }} close
+            if i + 1 < len && bytes[i] == b'}' && bytes[i + 1] == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 2);
+                }
+                i += 2;
+                continue;
+            }
+
+            i += 1;
+        }
+
+        None
+    }
+
+    /// Pre-lex validation: check that `/*` and `*/` are properly matched.
+    /// Detects unterminated multiline comments and stray `*/`.
+    fn validate_comment_markers(source: &str) -> Result<(), SqlfmtError> {
+        // Check that /* and */ are properly paired.
+        // SQL comments do NOT nest, so inner /* inside a comment is ignored.
+        let bytes = source.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        let mut in_comment = false;
+
+        while i < len {
+            if in_comment {
+                // Inside a /* comment: only look for the closing */
+                if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    in_comment = false;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Skip single-quoted strings
+            if bytes[i] == b'\'' {
+                i += 1;
+                while i < len && bytes[i] != b'\'' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            // Skip double-quoted identifiers
+            if bytes[i] == b'"' {
+                i += 1;
+                while i < len && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            // Skip single-line comments
+            if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // Jinja tags: skip {{ }}, {% %}, {# #} with depth tracking
+            if i + 1 < len
+                && bytes[i] == b'{'
+                && (bytes[i + 1] == b'{' || bytes[i + 1] == b'%' || bytes[i + 1] == b'#')
+            {
+                let open = bytes[i + 1];
+                let close = match open {
+                    b'{' => b'}',
+                    b'%' => b'%',
+                    _ => b'#',
+                };
+                let mut depth = 1;
+                i += 2;
+                while i + 1 < len && depth > 0 {
+                    // Skip strings inside Jinja tags
+                    if bytes[i] == b'\'' || bytes[i] == b'"' {
+                        let quote = bytes[i];
+                        i += 1;
+                        while i < len && bytes[i] != quote {
+                            if bytes[i] == b'\\' {
+                                i += 1;
+                            }
+                            i += 1;
+                        }
+                        if i < len {
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    if bytes[i] == b'{' && bytes[i + 1] == open {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes[i] == close && bytes[i + 1] == b'}' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            // Check for /* (open comment)
+            if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                in_comment = true;
+                i += 2;
+                continue;
+            }
+            // Check for stray */ (close without open)
+            if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                return Err(SqlfmtError::Bracket(
+                    "Encountered */ without a preceding /*".to_string(),
+                ));
+            }
+            i += 1;
+        }
+        if in_comment {
+            return Err(SqlfmtError::Bracket(
+                "Unterminated multiline comment (/* without matching */)".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Post-lex validation: check for unmatched closing brackets.
+    fn validate_brackets(&self) -> Result<(), SqlfmtError> {
+        let mut depth = 0i32;
+        for node in &self.arena {
+            match node.token.token_type {
+                TokenType::BracketOpen | TokenType::StatementStart => {
+                    depth += 1;
+                }
+                TokenType::BracketClose | TokenType::StatementEnd => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return Err(SqlfmtError::Bracket(format!(
+                            "Encountered closing bracket '{}' without a matching opening bracket",
+                            node.token.token
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn push_rules(&mut self, rules: Vec<Rule>) {

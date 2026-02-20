@@ -53,20 +53,24 @@ impl Comment {
         "--"
     }
 
-    /// Return the output marker — normalizes `//` and `#` to `--`.
+    /// Return the output marker.
+    /// Python sqlfmt normalizes `//` to `--` but preserves `#` as-is.
     pub fn output_marker(&self) -> &str {
-        match self.marker() {
-            "//" | "#" => "--",
-            m => m,
+        let m = self.marker();
+        if m == "//" {
+            "--"
+        } else {
+            m
         }
     }
 
-    /// Return the comment body (text after the marker, trimmed).
+    /// Return the comment body (text after the marker, leading whitespace trimmed).
+    /// Trailing whitespace is preserved to match Python sqlfmt behavior.
     pub fn body(&self) -> &str {
         let text = &self.token.token;
         let marker = self.marker();
         let after_marker = &text[marker.len()..];
-        after_marker.trim()
+        after_marker.trim_start()
     }
 
     /// Render as inline comment: `  -- comment text`
@@ -152,7 +156,7 @@ mod tests {
     #[test]
     fn test_body_extraction() {
         assert_eq!(make_comment("-- hello world", false).body(), "hello world");
-        assert_eq!(make_comment("--   spaces  ", false).body(), "spaces");
+        assert_eq!(make_comment("--   spaces  ", false).body(), "spaces  ");
         assert_eq!(make_comment("--", false).body(), "");
     }
 
