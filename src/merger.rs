@@ -241,6 +241,13 @@ impl LineMerger {
                 if !node.formatting_disabled.is_empty() {
                     return Err(ControlFlow::CannotMerge);
                 }
+                // Can't merge FmtOff/FmtOn directives with other content
+                if matches!(
+                    node.token.token_type,
+                    crate::token::TokenType::FmtOff | crate::token::TokenType::FmtOn
+                ) {
+                    return Err(ControlFlow::CannotMerge);
+                }
                 // Can't merge query dividers
                 if node.divides_queries() {
                     return Err(ControlFlow::CannotMerge);

@@ -323,6 +323,21 @@ impl Line {
         prev_segment_depth: (usize, usize),
         arena: &[Node],
     ) -> bool {
+        // Formatting boundaries always start new segments:
+        // FmtOff/FmtOn directives and formatting-disabled lines should not
+        // be merged with adjacent formatting-enabled content.
+        if self.has_formatting_disabled() {
+            return true;
+        }
+        if let Some(n) = self.first_content_node(arena) {
+            if matches!(
+                n.token.token_type,
+                crate::token::TokenType::FmtOff | crate::token::TokenType::FmtOn
+            ) {
+                return true;
+            }
+        }
+
         let depth = self.depth(arena);
         if depth <= prev_segment_depth || depth.1 < prev_segment_depth.1 {
             if (self.closes_bracket_from_previous_line(arena)
