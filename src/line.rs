@@ -161,6 +161,18 @@ impl Line {
             .unwrap_or(0)
     }
 
+    /// Length including inline comments (for merger length checks).
+    pub fn len_with_comments(&self, arena: &[Node]) -> usize {
+        let base = self.len(arena);
+        let inline_len: usize = self
+            .comments
+            .iter()
+            .filter(|c| c.is_inline())
+            .map(|c| c.render_inline().len())
+            .sum();
+        base + inline_len
+    }
+
     /// True if the line has no nodes.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()

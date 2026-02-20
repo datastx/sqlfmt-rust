@@ -161,9 +161,28 @@ impl LineMerger {
             return Ok(lines.to_vec());
         }
 
-        let (nodes, comments) = Self::extract_components(lines, arena)?;
+        // Extract leading/trailing blank and standalone-comment lines.
+        // These are preserved around the merged content.
+        let leading_count = lines
+            .iter()
+            .take_while(|l| l.is_blank_line(arena) || l.is_standalone_comment_line(arena))
+            .count();
+        let trailing_count = lines
+            .iter()
+            .rev()
+            .take_while(|l| l.is_blank_line(arena) || l.is_standalone_comment_line(arena))
+            .count();
+        let content_end = lines.len() - trailing_count;
+        let content_start = leading_count.min(content_end);
+        let content_lines = &lines[content_start..content_end];
 
-        let mut merged_line = Line::new(lines[0].previous_node);
+        if content_lines.len() <= 1 {
+            return Ok(lines.to_vec());
+        }
+
+        let (nodes, comments) = Self::extract_components(content_lines, arena)?;
+
+        let mut merged_line = Line::new(content_lines[0].previous_node);
         for &idx in &nodes {
             merged_line.append_node(idx);
         }
@@ -173,13 +192,10 @@ impl LineMerger {
             return Err(ControlFlow::CannotMerge);
         }
 
-        // Add leading/trailing blank lines
-        let leading = Self::extract_leading_blank_lines(lines, arena);
-        let trailing = Self::extract_trailing_blank_lines(lines, arena);
-
-        let mut result = leading;
+        // Assemble result: leading non-content + merged + trailing non-content
+        let mut result = lines[..content_start].to_vec();
         result.push(merged_line);
-        result.extend(trailing);
+        result.extend_from_slice(&lines[content_end..]);
         Ok(result)
     }
 
@@ -196,6 +212,40 @@ impl LineMerger {
         lines: &[Line],
         arena: &[Node],
     ) -> Result<(Vec<usize>, Vec<crate::comment::Comment>), ControlFlow> {
+        // Lines with inline comments cannot be merged with subsequent lines
+        // because inline comments must stay at the end of their line.
+        // Only the last non-blank line can have inline comments
+        // (they'll appear at end of merged line).
+        let last_content_idx = lines
+            .iter()
+            .rposition(|l| !l.is_blank_line(arena));
+        for (i, line) in lines.iter().enumerate() {
+            if Some(i) != last_content_idx
+                && !line.is_blank_line(arena)
+                && line.comments.iter().any(|c| c.is_inline())
+            {
+                return Err(ControlFlow::CannotMerge);
+            }
+        }
+
+        // Standalone comment-only lines in the middle of content cannot be merged,
+        // as they need to stay on their own line.
+        let first_content = lines
+            .iter()
+            .position(|l| !l.is_blank_line(arena) && !l.is_standalone_comment_line(arena));
+        let last_content = lines
+            .iter()
+            .rposition(|l| !l.is_blank_line(arena) && !l.is_standalone_comment_line(arena));
+        if let (Some(first), Some(last)) = (first_content, last_content) {
+            if first < last {
+                for (i, line) in lines.iter().enumerate() {
+                    if i > first && i < last && line.is_standalone_comment_line(arena) {
+                        return Err(ControlFlow::CannotMerge);
+                    }
+                }
+            }
+        }
+
         let mut nodes = Vec::new();
         let mut comments = Vec::new();
         let mut final_newline: Option<usize> = None;
@@ -295,6 +345,33 @@ impl LineMerger {
             }
         }
         blanks
+    }
+
+    /// Extract leading blank lines and standalone comment lines.
+    fn extract_leading_non_content(lines: &[Line], arena: &[Node]) -> Vec<Line> {
+        let mut result = Vec::new();
+        for line in lines {
+            if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
+                result.push(line.clone());
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    /// Extract trailing blank lines and standalone comment lines.
+    fn extract_trailing_non_content(lines: &[Line], arena: &[Node]) -> Vec<Line> {
+        let mut result = Vec::new();
+        for line in lines.iter().rev() {
+            if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
+                result.push(line.clone());
+            } else {
+                break;
+            }
+        }
+        result.reverse();
+        result
     }
 
     fn extract_trailing_blank_lines(lines: &[Line], arena: &[Node]) -> Vec<Line> {
