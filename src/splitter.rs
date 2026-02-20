@@ -77,6 +77,10 @@ impl LineSplitter {
     fn maybe_split_before(&self, node_idx: NodeIndex, arena: &[Node]) -> bool {
         let node = &arena[node_idx];
 
+        // Do NOT split before bracket operators (array indexing, etc.)
+        if node.is_bracket_operator(arena) {
+            return false;
+        }
         // Split before multiline jinja
         if node.is_multiline_jinja() {
             return true;
@@ -89,8 +93,11 @@ impl LineSplitter {
         if node.is_opening_jinja_block() {
             return true;
         }
-        // Split before operators
+        // Split before operators — BUT NOT the AND after BETWEEN
         if node.is_operator(arena) {
+            if node.is_the_and_after_between(arena) {
+                return false;
+            }
             return true;
         }
         // Split before closing brackets

@@ -96,11 +96,9 @@ impl Analyzer {
 
             Action::SafeAddNode {
                 token_type,
-                alt_token_type: _,
+                alt_token_type,
             } => {
-                // Try primary type; fall back on error
-                // For angle brackets: if we have an open angle bracket, close it;
-                // otherwise treat as the alt type
+                // Try primary type; fall back to alt_token_type on mismatch
                 if *token_type == TokenType::BracketOpen && token_text.contains('<') {
                     // Handle "array<", "struct<", "map<" — split into name + bracket
                     let angle_pos = token_text.find('<').unwrap();
@@ -110,9 +108,20 @@ impl Analyzer {
                         self.add_node(prefix, name_part, TokenType::Name);
                     }
                     self.add_node("", bracket_part, TokenType::BracketOpen);
-                    // Track the bracket
                     let last_idx = self.arena.len() - 1;
                     self.node_manager.push_bracket(last_idx);
+                } else if *token_type == TokenType::StatementEnd {
+                    // END: check if there is a matching CASE (StatementStart) in open brackets
+                    let has_matching_case = self
+                        .node_manager
+                        .open_brackets
+                        .iter()
+                        .any(|&idx| self.arena[idx].token.token_type == TokenType::StatementStart);
+                    if has_matching_case {
+                        self.add_node(prefix, token_text, TokenType::StatementEnd);
+                    } else {
+                        self.add_node(prefix, token_text, *alt_token_type);
+                    }
                 } else {
                     self.add_node(prefix, token_text, *token_type);
                     if token_type.is_opening_bracket() {
@@ -240,8 +249,18 @@ impl Analyzer {
                 self.pos += match_len;
             }
 
+            Action::HandleKeywordBeforeParen { token_type } => {
+                // The matched text includes the trailing `(`, but we only consume the keyword.
+                // Strip trailing `(` and any whitespace before it to get the keyword.
+                let keyword = token_text.trim_end_matches('(').trim_end();
+                self.add_node(prefix, keyword, *token_type);
+                // Only advance past prefix + keyword (leave `(` for bracket_open)
+                self.pos += prefix.len() + keyword.len();
+            }
+
             Action::LexRuleset { ruleset_name: _ } => {
-                // For now, just advance past the match
+                // For now, treat as UntermKeyword and advance
+                self.add_node(prefix, token_text, TokenType::UntermKeyword);
                 self.pos += match_len;
             }
         }

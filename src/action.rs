@@ -55,6 +55,11 @@ pub enum Action {
     /// Handle simple Jinja expression/statement.
     HandleJinja { token_type: TokenType },
 
+    /// Handle keyword that appears before `(`. The regex includes the trailing `(`
+    /// but we only consume the keyword portion, leaving `(` for the bracket_open rule.
+    /// Used for functions_that_overlap_with_word_operators, star_replace_exclude, etc.
+    HandleKeywordBeforeParen { token_type: TokenType },
+
     /// Lex with an alternate ruleset (for nested constructs like CREATE FUNCTION body).
     LexRuleset { ruleset_name: String },
 }

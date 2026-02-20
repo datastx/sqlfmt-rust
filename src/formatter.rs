@@ -64,45 +64,71 @@ impl QueryFormatter {
 
     /// Stage 3: Adjust indentation of Jinja block start/end to match
     /// the least-indented content inside the block.
-    fn dedent_jinja_blocks(&self, query: &mut Query, arena: &[Node]) {
+    fn dedent_jinja_blocks(&self, query: &mut Query, arena: &mut [Node]) {
         // Jinja block dedenting: scan for jinja blocks and adjust the depth
         // of the block start/end lines to match the minimum depth inside.
-        // This is important for proper indentation of {% if %}/{% endif %} blocks.
         let lines = &mut query.lines;
-        let len = lines.len();
-        if len == 0 {
+        if lines.is_empty() {
             return;
         }
 
-        // Find jinja block start/end pairs and adjust depth
         let mut i = 0;
         while i < lines.len() {
-            let line = &lines[i];
             // Check if this line starts with a jinja block start
-            if let Some(first) = line.first_content_node(arena) {
-                if first.is_opening_jinja_block() && first.token.token_type == crate::token::TokenType::JinjaBlockStart {
-                    // Find the matching end
-                    let start_depth = line.depth(arena);
-                    let mut j = i + 1;
-                    let mut min_depth = (usize::MAX, usize::MAX);
-                    while j < lines.len() {
-                        let inner = &lines[j];
-                        if !inner.is_blank_line(arena) {
-                            let d = inner.depth(arena);
-                            // Check if this is the closing block
-                            if let Some(fc) = inner.first_content_node(arena) {
-                                if fc.is_closing_jinja_block() && d.1 <= start_depth.1 {
-                                    break;
-                                }
-                            }
-                            if d.0 < min_depth.0 {
-                                min_depth.0 = d.0;
-                            }
-                            if d.1 < min_depth.1 {
-                                min_depth.1 = d.1;
+            let is_block_start = lines[i]
+                .first_content_node(arena)
+                .map(|n| {
+                    n.is_opening_jinja_block()
+                        && n.token.token_type
+                            == crate::token::TokenType::JinjaBlockStart
+                })
+                .unwrap_or(false);
+
+            if is_block_start {
+                let start_depth = lines[i].depth(arena);
+                let mut j = i + 1;
+                let mut min_sql_depth = usize::MAX;
+                let mut min_jinja_depth = usize::MAX;
+                let mut end_j = None;
+
+                while j < lines.len() {
+                    if !lines[j].is_blank_line(arena) {
+                        let d = lines[j].depth(arena);
+                        let is_end = lines[j]
+                            .first_content_node(arena)
+                            .map(|fc| fc.is_closing_jinja_block() && d.1 <= start_depth.1)
+                            .unwrap_or(false);
+                        if is_end {
+                            end_j = Some(j);
+                            break;
+                        }
+                        if d.0 < min_sql_depth {
+                            min_sql_depth = d.0;
+                        }
+                        if d.1 < min_jinja_depth {
+                            min_jinja_depth = d.1;
+                        }
+                    }
+                    j += 1;
+                }
+
+                // Apply dedent: adjust block start/end nodes to min_depth
+                if min_sql_depth < usize::MAX
+                    && min_sql_depth < start_depth.0
+                {
+                    // Adjust block start line
+                    if let Some(node_idx) = lines[i].first_content_node_idx(arena) {
+                        while arena[node_idx].open_brackets.len() > min_sql_depth {
+                            arena[node_idx].open_brackets.pop();
+                        }
+                    }
+                    // Adjust block end line
+                    if let Some(ej) = end_j {
+                        if let Some(node_idx) = lines[ej].first_content_node_idx(arena) {
+                            while arena[node_idx].open_brackets.len() > min_sql_depth {
+                                arena[node_idx].open_brackets.pop();
                             }
                         }
-                        j += 1;
                     }
                 }
             }

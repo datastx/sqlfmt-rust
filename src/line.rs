@@ -142,6 +142,11 @@ impl Line {
             .find(|n| !n.is_newline())
     }
 
+    /// Get the index of the first non-newline node.
+    pub fn first_content_node_idx(&self, arena: &[Node]) -> Option<NodeIndex> {
+        self.nodes.iter().copied().find(|&i| !arena[i].is_newline())
+    }
+
     /// Get the last non-newline node.
     pub fn last_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
         self.nodes

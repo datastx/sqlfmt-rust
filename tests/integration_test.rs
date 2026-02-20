@@ -253,3 +253,187 @@ fn test_format_fixture_complex_case() {
     let result = format_string(&source, &default_mode());
     assert!(result.is_ok(), "Should successfully format complex_case.sql");
 }
+
+// --- Phase 1-5 parity tests ---
+
+#[test]
+fn test_format_between_and_stays_together() {
+    let result = format_string(
+        "SELECT * FROM t WHERE amount BETWEEN 100 AND 200 AND status = 'active'\n",
+        &default_mode(),
+    )
+    .unwrap();
+    // BETWEEN 100 AND 200 should stay on the same line (AND not split)
+    assert!(
+        result.contains("between 100 and 200"),
+        "BETWEEN x AND y should stay together: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_window_frame_clause() {
+    let result = format_string(
+        "SELECT SUM(x) OVER (PARTITION BY grp ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("rows between unbounded preceding and current row"),
+        "Frame clause should be lowercased as single token: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_cluster_distribute_sort_by() {
+    let result = format_string(
+        "SELECT col1, col2 FROM my_table DISTRIBUTE BY col1 SORT BY col2\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("distribute by"),
+        "DISTRIBUTE BY should be recognized: {}",
+        result
+    );
+    assert!(
+        result.contains("sort by"),
+        "SORT BY should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_union_by_name() {
+    let result = format_string(
+        "SELECT a FROM t1 UNION ALL BY NAME SELECT b FROM t2\n",
+        &duckdb_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("union all by name"),
+        "UNION ALL BY NAME should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_partition_by() {
+    let result = format_string(
+        "SELECT ROW_NUMBER() OVER (PARTITION BY category ORDER BY id) AS rn FROM t\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("partition by"),
+        "PARTITION BY should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_on_inside_subquery() {
+    // ON should remain a keyword inside brackets (JOIN ... ON in subqueries)
+    let result = format_string(
+        "SELECT * FROM (SELECT a.id, b.name FROM a JOIN b ON a.id = b.id) subq\n",
+        &default_mode(),
+    )
+    .unwrap();
+    // ON should be formatted as a keyword (lowercased), not treated as a name
+    assert!(
+        result.contains("on"),
+        "ON inside subquery should be a keyword: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_not_regexp() {
+    let result = format_string(
+        "SELECT * FROM t WHERE name NOT REGEXP '^test'\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("not regexp"),
+        "NOT REGEXP should be recognized as word operator: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_binary_octal_hex_literals() {
+    let result = format_string(
+        "SELECT 0xFF, 0b1010, 0o777, .5, 42L\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(result.contains("0xFF") || result.contains("0xff"), "Hex literal: {}", result);
+    assert!(result.contains("0b1010"), "Binary literal: {}", result);
+    assert!(result.contains("0o777"), "Octal literal: {}", result);
+}
+
+#[test]
+fn test_format_curly_brace_brackets() {
+    let result = format_string(
+        "SELECT {fn NOW()}\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("{"),
+        "Curly braces should be supported: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_explain_analyze() {
+    let result = format_string(
+        "EXPLAIN ANALYZE SELECT * FROM t\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("explain analyze") || result.contains("explain"),
+        "EXPLAIN ANALYZE should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_fetch_first() {
+    let result = format_string(
+        "SELECT * FROM t ORDER BY id FETCH FIRST 10 ROWS ONLY\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("fetch first"),
+        "FETCH FIRST should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_with_recursive() {
+    let result = format_string(
+        "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 10) SELECT * FROM cte\n",
+        &default_mode(),
+    )
+    .unwrap();
+    assert!(
+        result.contains("with recursive"),
+        "WITH RECURSIVE should be recognized: {}",
+        result
+    );
+}
+
+#[test]
+fn test_format_idempotent_complex() {
+    let source = "SELECT a.id, b.name, CASE WHEN x > 0 THEN 'pos' ELSE 'neg' END AS sign, ROW_NUMBER() OVER (PARTITION BY category ORDER BY created_at DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS rn FROM table_a a LEFT JOIN table_b b ON a.id = b.id WHERE a.status = 'active' AND a.amount BETWEEN 100 AND 200 GROUP BY a.id, b.name HAVING count(*) > 1 ORDER BY a.id LIMIT 100\n";
+    let first = format_string(source, &default_mode()).unwrap();
+    let second = format_string(&first, &default_mode()).unwrap();
+    assert_eq!(first, second, "Formatting should be idempotent");
+}

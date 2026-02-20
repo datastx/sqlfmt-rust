@@ -145,6 +145,27 @@ pub fn core_rules() -> Vec<Rule> {
                 token_type: TokenType::Operator,
             },
         ),
+        // Binary literals: 0b1010
+        Rule::new(
+            "binary_literal",
+            396,
+            r"(0[bB][01]+)\b",
+            Action::HandleNumber,
+        ),
+        // Octal literals: 0o777
+        Rule::new(
+            "octal_literal",
+            397,
+            r"(0[oO][0-7]+)\b",
+            Action::HandleNumber,
+        ),
+        // Leading-dot decimals: .5, .123
+        Rule::new(
+            "leading_dot_number",
+            398,
+            r"(\.\d[\d_]*(?:[eE][+-]?\d[\d_]*)?(?:bd|d|f)?)\b",
+            Action::HandleNumber,
+        ),
         // Hex literals: 0x...
         Rule::new(
             "hex_literal",
@@ -152,24 +173,31 @@ pub fn core_rules() -> Vec<Rule> {
             r"(0[xX][0-9a-fA-F]+)\b",
             Action::HandleNumber,
         ),
-        // Scientific notation numbers
+        // Spark integer literal suffixes: 10L, 5S, 3Y
         Rule::new(
-            "scientific_number",
+            "spark_int_literal",
             400,
-            r"(\d[\d_]*(?:\.[\d_]*)?[eE][+-]?\d[\d_]*)\b",
+            r"(\d[\d_]*[lLsSkKyY])\b",
             Action::HandleNumber,
         ),
-        // Decimal numbers
+        // Scientific notation numbers (with optional Spark suffix)
+        Rule::new(
+            "scientific_number",
+            401,
+            r"(\d[\d_]*(?:\.[\d_]*)?[eE][+-]?\d[\d_]*(?:bd|d|f)?)\b",
+            Action::HandleNumber,
+        ),
+        // Decimal numbers (with optional Spark suffix)
         Rule::new(
             "decimal_number",
-            401,
-            r"(\d[\d_]*\.[\d_]*)\b",
+            402,
+            r"(\d[\d_]*\.[\d_]*(?:bd|d|f)?)\b",
             Action::HandleNumber,
         ),
         // Integer numbers
         Rule::new(
             "integer_number",
-            402,
+            403,
             r"(\d[\d_]*)\b",
             Action::HandleNumber,
         ),
@@ -228,20 +256,20 @@ pub fn core_rules() -> Vec<Rule> {
                 token_type: TokenType::Dot,
             },
         ),
-        // Opening brackets: (, [, ARRAY<, STRUCT<, ARRAY(, etc.
+        // Opening brackets: (, [, {
         Rule::new(
             "bracket_open",
             500,
-            r"(\(|\[)",
+            r"(\(|\[|\{)",
             Action::AddNode {
                 token_type: TokenType::BracketOpen,
             },
         ),
-        // Closing brackets: ), ]
+        // Closing brackets: ), ], }
         Rule::new(
             "bracket_close",
             510,
-            r"(\)|\])",
+            r"(\)|\]|\})",
             Action::AddNode {
                 token_type: TokenType::BracketClose,
             },
@@ -256,7 +284,7 @@ pub fn core_rules() -> Vec<Rule> {
                 alt_token_type: TokenType::Name,
             },
         ),
-        // Other identifiers: @variable, $1, $variable
+        // Other identifiers: @variable, $variable, $1, %(name)s, ?1
         Rule::new(
             "at_identifier",
             600,
@@ -273,11 +301,39 @@ pub fn core_rules() -> Vec<Rule> {
                 token_type: TokenType::Name,
             },
         ),
-        // Multi-char operators starting with > or < (must come before angle_bracket_close)
+        // PostgreSQL positional param: $1, $23
+        Rule::new(
+            "pg_positional_param",
+            602,
+            r"(\$\d+)\b",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // psycopg format param: %(name)s, %s
+        Rule::new(
+            "psycopg_param",
+            603,
+            r"(%(?:\([^%()]+\))?s)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Bun/JDBC positional param: ?1, ?23
+        Rule::new(
+            "bun_param",
+            604,
+            r"(\?\d+)",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Multi-char operators (must come before angle_bracket_close and single-char ops)
+        // Includes PostgreSQL geometric, JSON, text-search, and containment operators
         Rule::new(
             "compound_operator",
             785,
-            r"(>=|>>|<>|<=|<=>|!=|<<|->|->>|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*)",
+            r"(>=|>>|<>|<=|<=>|!=|<<|->->|->|->>|<->|@-@|<#>|@>|<@|@@|\?\||\?&|-\|-|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*|!!=)",
             Action::AddNode {
                 token_type: TokenType::Operator,
             },
@@ -293,7 +349,7 @@ pub fn core_rules() -> Vec<Rule> {
         Rule::new(
             "operator",
             800,
-            r"(~|[+\-/%&|^])",
+            r"(~|[+\-/%&|^?!])",
             Action::AddNode {
                 token_type: TokenType::Operator,
             },

@@ -61,14 +61,24 @@ impl OperatorPrecedence {
 
     fn from_word_operator(value: &str) -> Self {
         let lower = value.to_ascii_lowercase();
-        match lower.as_str() {
+        // Normalize internal whitespace for multi-word operators
+        let normalized: String = lower.split_whitespace().collect::<Vec<_>>().join(" ");
+        match normalized.as_str() {
             "as" => Self::As,
             "over" | "within group" | "filter" => Self::OtherTight,
-            "in" | "not in" | "like" | "not like" | "ilike" | "not ilike" | "similar to"
-            | "not similar to" => Self::Membership,
+            "in" | "not in" | "global not in" | "global in"
+            | "like" | "not like" | "like any" | "like all"
+            | "not like any" | "not like all"
+            | "ilike" | "not ilike" | "ilike any" | "ilike all"
+            | "not ilike any" | "not ilike all"
+            | "similar to" | "not similar to"
+            | "regexp" | "not regexp"
+            | "rlike" | "not rlike" => Self::Membership,
             "between" | "not between" => Self::Membership,
             "is" | "is not" | "isnull" | "notnull" | "is distinct from"
-            | "is not distinct from" => Self::Presence,
+            | "is not distinct from"
+            | "exists" | "not exists" => Self::Presence,
+            "interval" | "some" => Self::Other,
             _ => Self::Other,
         }
     }
@@ -78,7 +88,8 @@ impl OperatorPrecedence {
             "**" => Self::Exponent,
             "*" | "/" | "%" | "||" => Self::Multiplication,
             "+" | "-" => Self::Addition,
-            "=" | "!=" | "<>" | "<" | ">" | "<=" | ">=" | "<=>" | "~" | "!~" | "~*" | "!~*" => {
+            "=" | "!=" | "<>" | "<" | ">" | "<=" | ">=" | "<=>" | "~" | "!~" | "~*" | "!~*"
+            | "@>" | "<@" | "@@" | "<->" | "!!" | "&&" | "?|" | "?&" | "-|-" => {
                 Self::Comparators
             }
             _ => Self::Other,
