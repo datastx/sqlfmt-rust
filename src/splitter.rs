@@ -123,8 +123,12 @@ impl LineSplitter {
             }
             return true;
         }
-        // Split before closing brackets
+        // Split before closing brackets — but NOT before > (angle bracket close)
+        // since angle bracket content should stay on the same line
         if node.is_closing_bracket() {
+            if node.value == ">" {
+                return false;
+            }
             return true;
         }
         // Split before closing jinja blocks
@@ -174,8 +178,13 @@ impl LineSplitter {
         if node.is_comma() {
             return (true, false);
         }
-        // Always split after opening brackets
+        // Always split after opening brackets — but NOT after angle brackets
+        // (< for type constructors like array<int64>). Angle bracket content
+        // is typically short and should stay on the same line as the type keyword.
         if node.is_opening_bracket() {
+            if node.value == "<" {
+                return (false, false);
+            }
             return (true, false);
         }
         // Always split after opening jinja blocks ({% if %}, {% for %}).
@@ -188,8 +197,16 @@ impl LineSplitter {
             }
             return (true, false);
         }
-        // Always split after unterm keywords
+        // Always split after unterm keywords — but not after LATERAL when
+        // followed by ( (it should stay as "lateral(" like a function call)
         if node.is_unterm_keyword() {
+            if node.value.eq_ignore_ascii_case("lateral") {
+                // Check if next node in the arena is an opening bracket
+                let next_idx = node_idx + 1;
+                if next_idx < arena.len() && arena[next_idx].is_opening_bracket() {
+                    return (false, false);
+                }
+            }
             return (true, false);
         }
         // Always split after query dividers
