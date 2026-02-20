@@ -305,7 +305,14 @@ impl LineMerger {
 
                 // Track jinja block nesting
                 match node.token.token_type {
-                    crate::token::TokenType::JinjaBlockStart => jinja_block_depth += 1,
+                    crate::token::TokenType::JinjaBlockStart => {
+                        // Two JinjaBlockStart tokens shouldn't be merged
+                        // (each block start needs its own line)
+                        if jinja_block_depth > 0 {
+                            return Err(ControlFlow::CannotMerge);
+                        }
+                        jinja_block_depth += 1;
+                    }
                     crate::token::TokenType::JinjaBlockEnd => jinja_block_depth -= 1,
                     _ => {}
                 }
