@@ -34,7 +34,7 @@ impl Comment {
     }
 
     pub fn is_inline(&self) -> bool {
-        !self.is_standalone && !self.is_multiline() && !self.is_c_style()
+        !self.is_standalone && !self.is_multiline()
     }
 
     /// Return the comment marker (e.g., "--", "/*", "{#-").
@@ -53,6 +53,14 @@ impl Comment {
         "--"
     }
 
+    /// Return the output marker — normalizes `//` and `#` to `--`.
+    pub fn output_marker(&self) -> &str {
+        match self.marker() {
+            "//" | "#" => "--",
+            m => m,
+        }
+    }
+
     /// Return the comment body (text after the marker, trimmed).
     pub fn body(&self) -> &str {
         let text = &self.token.token;
@@ -63,7 +71,12 @@ impl Comment {
 
     /// Render as inline comment: `  -- comment text`
     pub fn render_inline(&self) -> String {
-        format!("  {} {}", self.marker(), self.body())
+        if self.is_c_style() {
+            // Preserve C-style comments exactly (especially hints like /*+ ... */)
+            format!("  {}", self.token.token.trim())
+        } else {
+            format!("  {} {}", self.output_marker(), self.body())
+        }
     }
 
     /// Render as standalone comment on its own line(s).
@@ -73,7 +86,7 @@ impl Comment {
             return format!("{}{}\n", prefix, self.token.token.trim());
         }
 
-        let marker = self.marker();
+        let marker = self.output_marker();
         let body = self.body();
 
         if body.is_empty() {
@@ -169,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_is_inline() {
-        // Non-standalone, non-multiline, non-c-style => inline
+        // Non-standalone, non-multiline => inline
         assert!(make_comment("-- inline", false).is_inline());
 
         // Standalone => NOT inline
@@ -178,8 +191,11 @@ mod tests {
         // Multiline => NOT inline
         assert!(!make_comment("-- line1\n-- line2", false).is_inline());
 
-        // C-style => NOT inline
-        assert!(!make_comment("/* block */", false).is_inline());
+        // Single-line C-style, non-standalone => inline (for hints like /*+ ... */)
+        assert!(make_comment("/* block */", false).is_inline());
+
+        // Multiline C-style => NOT inline
+        assert!(!make_comment("/* line1\n   line2 */", false).is_inline());
     }
 
     #[test]

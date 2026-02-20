@@ -97,6 +97,8 @@ impl TokenType {
                 | Self::Newline
                 | Self::BracketClose
                 | Self::CommentEnd
+                | Self::DoublColon
+                | Self::Colon
         )
     }
 

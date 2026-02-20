@@ -1,13 +1,28 @@
 pub mod common;
 pub mod core;
 
+use std::sync::LazyLock;
+
 use crate::action::Action;
 use crate::rule::Rule;
 use crate::token::TokenType;
 
+/// Cached compiled main rules. Regex compilation is expensive (~50 patterns),
+/// so we compile once and clone on each access. Regex::clone() is O(1) since
+/// it uses Arc internally.
+static MAIN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_main_rules);
+
+/// Cached compiled jinja rules.
+static JINJA_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_jinja_rules);
+
+/// Get the MAIN rule set, cloned from a cached compiled version.
+pub fn main_rules() -> Vec<Rule> {
+    MAIN_RULES.clone()
+}
+
 /// Build the MAIN rule set used by the Polyglot (default) dialect.
 /// This adds SQL keywords, operators, and statement handling on top of CORE rules.
-pub fn main_rules() -> Vec<Rule> {
+fn build_main_rules() -> Vec<Rule> {
     let mut rules = core::core_rules();
 
     // ---- Statement start/end (CASE/END) ----
@@ -474,8 +489,13 @@ pub fn main_rules() -> Vec<Rule> {
     rules
 }
 
-/// Build rules for the Jinja context.
+/// Get Jinja rules, cloned from a cached compiled version.
 pub fn jinja_rules() -> Vec<Rule> {
+    JINJA_RULES.clone()
+}
+
+/// Build rules for the Jinja context.
+fn build_jinja_rules() -> Vec<Rule> {
     // Jinja block start patterns
     let mut rules = vec![
         // {% if ... %}

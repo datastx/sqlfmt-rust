@@ -206,20 +206,17 @@ impl NodeManager {
         let (prev, extra_whitespace) = Self::get_previous_token(previous_node, arena);
         let prev_type = prev.map(|n| n.token.token_type);
 
-        // No space after an open bracket or cast operator (::)
+        // No space after an open bracket, cast operator (::), or colon
         if matches!(
             prev_type,
-            Some(TokenType::BracketOpen) | Some(TokenType::DoublColon)
+            Some(TokenType::BracketOpen) | Some(TokenType::DoublColon) | Some(TokenType::Colon)
         ) {
             return String::new();
         }
 
-        // Always a space before keywords/operators/etc. except after open bracket
-        if tt.is_preceded_by_space_except_after_open_bracket() {
-            return " ".to_string();
-        }
-
-        // Names preceded by dots or colons are namespaced identifiers — no space
+        // Names/stars preceded by dots or colons are namespaced identifiers — no space
+        // This must come BEFORE the is_preceded_by_space check so that
+        // `table.*` renders as `table.*` not `table. *`
         if tt.is_possible_name()
             && matches!(prev_type, Some(TokenType::Dot) | Some(TokenType::Colon))
         {
@@ -229,6 +226,55 @@ impl NodeManager {
         // Numbers preceded by colons are simple slices — no space
         if tt == TokenType::Number && prev_type == Some(TokenType::Colon) {
             return String::new();
+        }
+
+        // No space between unary +/- and the following number/dot
+        // Unary context: the +/- follows an operator, keyword, comma, or open bracket
+        if matches!(tt, TokenType::Number | TokenType::Dot | TokenType::Name)
+            && prev_type == Some(TokenType::Operator)
+        {
+            if let Some(prev_node) = prev {
+                if prev_node.value == "+" || prev_node.value == "-" {
+                    let (prev_prev, _) =
+                        Self::get_previous_token(prev_node.previous_node, arena);
+                    let is_unary = match prev_prev {
+                        None => true,
+                        Some(pp) => matches!(
+                            pp.token.token_type,
+                            TokenType::Operator
+                                | TokenType::WordOperator
+                                | TokenType::BooleanOperator
+                                | TokenType::UntermKeyword
+                                | TokenType::Comma
+                                | TokenType::BracketOpen
+                                | TokenType::StatementStart
+                                | TokenType::SetOperator
+                                | TokenType::On
+                                | TokenType::DoublColon
+                        ),
+                    };
+                    if is_unary {
+                        return String::new();
+                    }
+                }
+            }
+        }
+
+        // No space after a select-star when followed by "columns"
+        // (DuckDB *COLUMNS pattern — *REPLACE and *EXCLUDE are handled by star_replace_exclude rule)
+        if tt == TokenType::Name && prev_type == Some(TokenType::Star) {
+            if let Some(prev_node) = prev {
+                if !prev_node.is_multiplication_star(arena)
+                    && token.token.eq_ignore_ascii_case("columns")
+                {
+                    return String::new();
+                }
+            }
+        }
+
+        // Always a space before keywords/operators/etc. except after open bracket
+        if tt.is_preceded_by_space_except_after_open_bracket() {
+            return " ".to_string();
         }
 
         // Open brackets with `<` (BQ type definitions like array<int64>)
@@ -243,6 +289,8 @@ impl NodeManager {
         // Open brackets that follow names/quoted names are function calls
         // Open brackets that follow closing brackets are array indexes
         // Open brackets that follow open brackets are nested brackets
+        // EXCEPTION: "filter(" and "offset(" after a closing bracket are clause keywords,
+        // not function calls, and need a space: e.g., count(*) filter (where ...)
         if tt == TokenType::BracketOpen
             && matches!(
                 prev_type,
@@ -252,6 +300,23 @@ impl NodeManager {
                     | Some(TokenType::BracketClose)
             )
         {
+            if prev_type == Some(TokenType::Name) {
+                if let Some(prev_node) = prev {
+                    let lv = prev_node.value.to_ascii_lowercase();
+                    if lv == "filter" || lv == "offset" {
+                        let (pp, _) =
+                            Self::get_previous_token(prev_node.previous_node, arena);
+                        if let Some(pp_node) = pp {
+                            if matches!(
+                                pp_node.token.token_type,
+                                TokenType::BracketClose | TokenType::StatementEnd
+                            ) {
+                                return " ".to_string();
+                            }
+                        }
+                    }
+                }
+            }
             return String::new();
         }
 
@@ -322,8 +387,18 @@ impl NodeManager {
                 .join(" ");
         }
 
-        // For non-quoted names in case-insensitive mode, lowercase
+        // Lowercase number literals (hex 0xFF→0xff, octal 0O→0o, scientific 1E9→1e9)
+        if tt == TokenType::Number {
+            return token.token.to_ascii_lowercase();
+        }
+
+        // For non-quoted names in case-insensitive mode, lowercase —
+        // but preserve case for string literals (single-quoted) and dollar-quoted strings
         if !self.case_sensitive_names && tt == TokenType::Name {
+            let first = token.token.as_bytes().first().copied();
+            if matches!(first, Some(b'\'') | Some(b'$')) {
+                return token.token.clone();
+            }
             return token.token.to_ascii_lowercase();
         }
 

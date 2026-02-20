@@ -39,3 +39,10 @@ predicates = "3"
 lto = true
 codegen-units = 1
 strip = true
+
+# Optimize dependencies in test/dev builds for much faster regex execution
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test.package."*"]
+opt-level = 2

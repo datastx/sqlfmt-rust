@@ -99,11 +99,11 @@ pub fn always_rules() -> Vec<Rule> {
                 token_type: TokenType::Name,
             },
         ),
-        // Line comment: -- or // (but not fmt:off/on)
+        // Line comment: --, //, or # (but not fmt:off/on)
         Rule::new(
             "line_comment",
             300,
-            r"(--[^\n]*|//[^\n]*)",
+            r"(--[^\n]*|//[^\n]*|#[^\n]*)",
             Action::AddComment,
         ),
         // Block comment start: /*
@@ -126,11 +126,11 @@ pub fn core_rules() -> Vec<Rule> {
     let mut rules = always_rules();
 
     rules.extend(vec![
-        // PostgreSQL hash operators: #>>, #>, #-, #
+        // PostgreSQL hash operators: #>>, #>, #-
         Rule::new(
             "pg_operator",
             299,
-            r"(#>>|#>|#-|#)",
+            r"(#>>|#>|#-)",
             Action::AddNode {
                 token_type: TokenType::Operator,
             },
@@ -320,10 +320,11 @@ pub fn core_rules() -> Vec<Rule> {
         ),
         // Multi-char operators (must come before angle_bracket_close and single-char ops)
         // Includes PostgreSQL geometric, JSON, text-search, and containment operators
+        // Also includes %% (psycopg escaped percent)
         Rule::new(
             "compound_operator",
             785,
-            r"(>=|>>|<>|<=|<=>|!=|<<|->->|->|->>|<->|@-@|<#>|@>|<@|@@|\?\||\?&|-\|-|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*|!!=)",
+            r"(>=|=>|>>|<>|<=|<=>|!=|<<|->->|->|->>|<->|@-@|<#>|@>|<@|@@|\?\||\?&|-\|-|\|\|/|\|/|\|\||&&|\*\*|!~\*|!~|~\*|!!=|%%)",
             Action::AddNode {
                 token_type: TokenType::Operator,
             },

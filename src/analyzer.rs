@@ -20,6 +20,9 @@ pub struct Analyzer {
     comment_buffer: Vec<Comment>,
     line_buffer: Vec<Line>,
     pos: usize,
+    /// When true, the next HandleNewline should not create a blank line.
+    /// Set after HandleSemicolon and HandleSetOperator which already flush.
+    suppress_next_newline: bool,
 }
 
 impl Analyzer {
@@ -33,6 +36,7 @@ impl Analyzer {
             line_buffer: Vec::new(),
             arena: Vec::new(),
             pos: 0,
+            suppress_next_newline: false,
         }
     }
 
@@ -142,7 +146,11 @@ impl Analyzer {
             }
 
             Action::HandleNewline => {
-                self.flush_line_buffer();
+                if self.suppress_next_newline {
+                    self.suppress_next_newline = false;
+                } else {
+                    self.flush_line_buffer();
+                }
                 self.pos += match_len;
             }
 
@@ -154,6 +162,7 @@ impl Analyzer {
                     self.rule_stack.pop();
                 }
                 self.node_manager.reset();
+                self.suppress_next_newline = true;
                 self.pos += match_len;
             }
 
@@ -190,10 +199,15 @@ impl Analyzer {
             }
 
             Action::HandleSetOperator => {
-                self.flush_line_buffer();
+                // Only flush if there's buffered content; don't create a spurious
+                // blank line when the previous newline already flushed the buffer.
+                if !self.node_buffer.is_empty() || !self.comment_buffer.is_empty() {
+                    self.flush_line_buffer();
+                }
                 self.add_node(prefix, token_text, TokenType::SetOperator);
                 self.flush_line_buffer();
                 self.node_manager.reset();
+                self.suppress_next_newline = true;
                 self.pos += match_len;
             }
 
@@ -380,6 +394,7 @@ impl Analyzer {
         self.line_buffer.clear();
         self.arena.clear();
         self.pos = 0;
+        self.suppress_next_newline = false;
         self.node_manager.reset();
     }
 
