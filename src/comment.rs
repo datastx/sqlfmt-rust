@@ -109,6 +109,13 @@ impl Comment {
             return format!("{}{} {}\n", prefix, marker, body);
         }
 
+        // Python sqlfmt does NOT wrap single-line comments containing Jinja
+        // expressions ({{ ... }}) or other structured content.
+        // Only wrap plain text comments at word boundaries.
+        if body.contains("{{") || body.contains("{%") || body.contains("{#") {
+            return format!("{}{} {}\n", prefix, marker, body);
+        }
+
         // Wrap long comment text at word boundaries
         let mut result = String::new();
         let mut current_line = String::new();
@@ -237,6 +244,21 @@ mod tests {
         assert!(
             line_count > 1,
             "Long comment should wrap: got {} lines from: {}",
+            line_count,
+            rendered
+        );
+    }
+
+    #[test]
+    fn test_jinja_comment_not_wrapped() {
+        // Comments with Jinja expressions should NOT be wrapped
+        let text = "-- depends_on: {{ ref('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') }}";
+        let c = make_comment(text, true);
+        let rendered = c.render_standalone("", 88);
+        let line_count = rendered.lines().count();
+        assert_eq!(
+            line_count, 1,
+            "Jinja comment should NOT wrap: got {} lines from: {}",
             line_count,
             rendered
         );

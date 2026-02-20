@@ -567,15 +567,23 @@ impl LineMerger {
                     }
                     // LATERAL merges with previous when previous ends with comma
                     // (FROM clause: "from t1, lateral flatten(...)")
+                    // But NOT when the LATERAL's bracket has multiline content
+                    // that can't fit on one line (the lateral subquery needs its
+                    // own line in that case).
                     Some(n)
                         if n.token.token_type == crate::token::TokenType::UntermKeyword
                             && n.value.eq_ignore_ascii_case("lateral") =>
                     {
-                        prev_segment
+                        let prev_ends_comma = prev_segment
                             .tail(arena)
                             .ok()
                             .map(|(_, tail_line)| tail_line.ends_with_comma(arena))
-                            .unwrap_or(false)
+                            .unwrap_or(false);
+                        if !prev_ends_comma {
+                            return false;
+                        }
+                        // Only merge if the lateral segment can fit on one line
+                        self.create_merged_line(&segment.lines, arena).is_ok()
                     }
                     _ => false,
                 }

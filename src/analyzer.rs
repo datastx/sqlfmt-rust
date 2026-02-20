@@ -23,6 +23,11 @@ pub struct Analyzer {
     /// When true, the next HandleNewline should not create a blank line.
     /// Set after HandleSemicolon and HandleSetOperator which already flush.
     suppress_next_newline: bool,
+    /// Set after a newline was suppressed, cleared after use. Prevents comments
+    /// on the next line from being incorrectly attached as inline to the
+    /// previous semicolon line (since the suppressed newline means the
+    /// comment's prefix won't contain '\n').
+    had_suppressed_newline: bool,
     /// Trailing whitespace captured from HandleNewline's prefix.
     /// Stored in the newline node's token prefix so formatting-disabled
     /// lines can preserve trailing whitespace before newlines.
@@ -41,6 +46,7 @@ impl Analyzer {
             arena: Vec::new(),
             pos: 0,
             suppress_next_newline: false,
+            had_suppressed_newline: false,
             trailing_whitespace: String::new(),
         }
     }
@@ -211,6 +217,7 @@ impl Analyzer {
             Action::HandleNewline => {
                 if self.suppress_next_newline {
                     self.suppress_next_newline = false;
+                    self.had_suppressed_newline = true;
                 } else {
                     // Store trailing whitespace from this newline match
                     // (prefix captures whitespace between last token and newline)
@@ -503,8 +510,12 @@ impl Analyzer {
         // Attach it directly to the previous line instead of buffering it as standalone.
         if is_standalone && !self.line_buffer.is_empty() && !token_text.is_empty() {
             // Check if the comment is on the same line as the semicolon
-            // by examining the original prefix (text between semicolon and comment)
-            let same_line = !_prefix.contains('\n') && !_prefix.is_empty();
+            // by examining the original prefix (text between semicolon and comment).
+            // Also check had_suppressed_newline: when a newline after a semicolon
+            // was suppressed (to prevent blank lines), the prefix won't contain '\n'
+            // even though the comment IS on a different line.
+            let same_line =
+                !_prefix.contains('\n') && !_prefix.is_empty() && !self.had_suppressed_newline;
             if same_line {
                 let last_line = self.line_buffer.last().unwrap();
                 // Check if the last content node in the previous line is a semicolon
@@ -537,6 +548,7 @@ impl Analyzer {
             }
         }
 
+        self.had_suppressed_newline = false;
         let comment = Comment::new(token, is_standalone, prev);
         self.comment_buffer.push(comment);
     }
@@ -649,6 +661,7 @@ impl Analyzer {
         self.arena.clear();
         self.pos = 0;
         self.suppress_next_newline = false;
+        self.had_suppressed_newline = false;
         self.trailing_whitespace.clear();
         self.node_manager.reset();
     }

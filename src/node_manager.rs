@@ -82,9 +82,16 @@ impl NodeManager {
                 let mut ob = prev.open_brackets.clone();
                 let mut oj = prev.open_jinja_blocks.clone();
 
-                // Add previous node to brackets if it opens a scope
+                // Add previous node to brackets if it opens a scope.
+                // LATERAL is an unterm keyword for splitting but does NOT
+                // increase depth for the next node — it's a FROM clause
+                // modifier, not a clause-level keyword.
                 if prev.is_unterm_keyword() || prev.is_opening_bracket() {
-                    ob.push(prev_idx);
+                    let is_lateral_kw = prev.is_unterm_keyword()
+                        && prev.value.eq_ignore_ascii_case("lateral");
+                    if !is_lateral_kw {
+                        ob.push(prev_idx);
+                    }
                 } else if prev.is_opening_jinja_block() {
                     oj.push(prev_idx);
                 }
@@ -96,10 +103,15 @@ impl NodeManager {
         // Handle tokens that reduce depth
         match token.token_type {
             TokenType::UntermKeyword | TokenType::SetOperator => {
-                // Pop last unterm keyword if any (unterm keywords at same depth replace each other)
-                if let Some(last) = node_brackets.last() {
-                    if arena[*last].is_unterm_keyword() {
-                        node_brackets.pop();
+                // Pop last unterm keyword if any (unterm keywords at same depth replace each other).
+                // LATERAL should NOT pop the previous keyword — it's a modifier
+                // within the FROM clause, not a replacement for FROM.
+                let is_lateral = token.token.eq_ignore_ascii_case("lateral");
+                if !is_lateral {
+                    if let Some(last) = node_brackets.last() {
+                        if arena[*last].is_unterm_keyword() {
+                            node_brackets.pop();
+                        }
                     }
                 }
             }
