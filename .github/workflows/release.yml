@@ -13,7 +13,7 @@ jobs:
     name: Build - ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
@@ -110,8 +110,24 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -lhR artifacts/
+      - name: Verify all platform artifacts are present
+        run: |
+          EXPECTED=(
+            "sqlfmt-v${{ steps.version.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
+            "sqlfmt-v${{ steps.version.outputs.version }}-aarch64-unknown-linux-musl.tar.gz"
+            "sqlfmt-v${{ steps.version.outputs.version }}-x86_64-apple-darwin.tar.gz"
+            "sqlfmt-v${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz"
+          )
+          echo "Expected artifacts:"
+          for f in "${EXPECTED[@]}"; do
+            echo "  - $f"
+            if [ ! -f "artifacts/$f" ]; then
+              echo "ERROR: Missing artifact: $f"
+              exit 1
+            fi
+          done
+          echo "All 4 platform artifacts present."
+          ls -lh artifacts/
 
       - name: Generate checksums
         run: |
