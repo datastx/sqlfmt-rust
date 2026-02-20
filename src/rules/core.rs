@@ -430,11 +430,11 @@ pub fn core_rules() -> Vec<Rule> {
                 token_type: TokenType::BracketClose,
             },
         ),
-        // Angle bracket: array<, struct<, map<
+        // Angle bracket: array<, struct<, map<, table<
         Rule::new(
             "angle_bracket_open",
             505,
-            r"(array|struct|map)\s*(<)",
+            r"(array|struct|map|table)\s*(<)",
             Action::SafeAddNode {
                 token_type: TokenType::BracketOpen,
                 alt_token_type: TokenType::Name,

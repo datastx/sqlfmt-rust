@@ -316,7 +316,7 @@ impl NodeManager {
             // No space after array/struct/map (these are type constructors)
             if let Some(prev_node) = prev {
                 let lv = prev_node.value.to_ascii_lowercase();
-                if lv == "array" || lv == "struct" || lv == "map" {
+                if lv == "array" || lv == "struct" || lv == "map" || lv == "table" {
                     return Cow::Borrowed("");
                 }
             }
