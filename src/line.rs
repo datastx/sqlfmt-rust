@@ -125,10 +125,12 @@ impl Line {
         let own_prefix = self.indentation(arena);
         let prefix = indent_override.unwrap_or(&own_prefix);
 
-        // Standalone comments go before the line
+        // Standalone comments (and multiline non-standalone comments) go before the line.
+        // A multiline comment that is not standalone (e.g., /* ... */ appearing mid-line)
+        // must still be rendered as standalone to avoid being silently dropped.
         for comment in &self.comments {
-            if comment.is_standalone {
-                result.push_str(&comment.render_standalone(&prefix, max_line_length));
+            if comment.is_standalone || comment.is_multiline() {
+                result.push_str(&comment.render_standalone(prefix, max_line_length));
             }
         }
 

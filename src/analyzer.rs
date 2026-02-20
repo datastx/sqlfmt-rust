@@ -222,14 +222,16 @@ impl Analyzer {
             }
 
             Action::HandleSemicolon => {
+                // Don't flush immediately — let the newline handler flush.
+                // This allows trailing comments on the same line (after the ;)
+                // to be captured as inline comments on the preceding content line,
+                // rather than becoming orphaned standalone comments.
                 self.add_node(prefix, token_text, TokenType::Semicolon);
-                self.flush_line_buffer();
                 // Reset rule stack to base
                 while self.rule_stack.len() > 1 {
                     self.rule_stack.pop();
                 }
                 self.node_manager.reset();
-                self.suppress_next_newline = true;
                 self.pos += match_len;
             }
 
@@ -459,7 +461,27 @@ impl Analyzer {
         let epos = spos + token_text.len();
         let token = Token::new(TokenType::Comment, "", token_text, spos, epos);
         let is_standalone = self.node_buffer.is_empty();
-        let prev = self.previous_node_index();
+        // If the last node in the buffer is a semicolon, attach the comment
+        // to the node before the semicolon. This ensures inline comments after
+        // semicolons (e.g., `from table; -- comment`) stay with the preceding
+        // content line when the semicolon is split to its own line.
+        let prev = if !is_standalone {
+            if let Some(&last_idx) = self.node_buffer.last() {
+                if self.arena[last_idx].token.token_type == TokenType::Semicolon {
+                    if self.node_buffer.len() >= 2 {
+                        Some(self.node_buffer[self.node_buffer.len() - 2])
+                    } else {
+                        self.previous_node_index()
+                    }
+                } else {
+                    self.previous_node_index()
+                }
+            } else {
+                self.previous_node_index()
+            }
+        } else {
+            self.previous_node_index()
+        };
         let comment = Comment::new(token, is_standalone, prev);
         self.comment_buffer.push(comment);
     }
