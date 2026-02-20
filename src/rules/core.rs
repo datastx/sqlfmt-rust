@@ -191,6 +191,42 @@ pub fn always_rules() -> Vec<Rule> {
                 token_type: TokenType::JinjaStatement,
             },
         ),
+        // Raw triple double-quoted string: r"""..."""
+        Rule::new(
+            "raw_triple_double_quoted_string",
+            196,
+            r#"(r"""[\s\S]*?""")"#,
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Raw triple single-quoted string: r'''...'''
+        Rule::new(
+            "raw_triple_single_quoted_string",
+            196,
+            r"(r'''[\s\S]*?''')",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Triple single-quoted string: '''...'''
+        Rule::new(
+            "triple_single_quoted_string",
+            197,
+            r"('''[\s\S]*?''')",
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
+        // Triple double-quoted string: """..."""
+        Rule::new(
+            "triple_double_quoted_string",
+            198,
+            r#"("""[\s\S]*?""")"#,
+            Action::AddNode {
+                token_type: TokenType::Name,
+            },
+        ),
         // Single-quoted string
         Rule::new(
             "single_quoted_string",
@@ -507,6 +543,31 @@ pub fn core_rules() -> Vec<Rule> {
     ]);
 
     rules
+}
+
+/// Build the Jinja set block rules — applied inside `{% set x %}...{% endset %}`.
+/// Only matches `{% endset %}` to exit, otherwise treats all content as Data.
+pub fn jinja_set_block_rules() -> Vec<Rule> {
+    vec![
+        // {% endset %} (exits set block mode)
+        Rule::new(
+            "jinja_endset",
+            116,
+            r"(\{%-?\s*endset\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // Data: everything else up to newline (preserves original text verbatim)
+        Rule::new(
+            "data",
+            5000,
+            r"([^\n]+)",
+            Action::AddNode {
+                token_type: TokenType::Data,
+            },
+        ),
+        // Newline
+        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
+    ]
 }
 
 /// Build the FMT_OFF rules — applied when `-- fmt: off` is active.

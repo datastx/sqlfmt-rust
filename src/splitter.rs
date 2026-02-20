@@ -213,6 +213,9 @@ impl LineSplitter {
         }
 
         // Determine comment distribution
+        // - Inline comments stay with the line containing their previous_node
+        // - Standalone comments go to the NEXT line (they describe what follows)
+        // - Orphaned comments (previous_node from an earlier split) attach to current head
         let (head_comments, tail_comments) = if no_tail {
             (comments.to_vec(), Vec::new())
         } else if comments.is_empty() {
@@ -221,13 +224,33 @@ impl LineSplitter {
             // If head is just a comma, pass all comments to tail
             (Vec::new(), comments.to_vec())
         } else {
+            let remaining_nodes: Vec<NodeIndex> = if index < line.nodes.len() {
+                line.nodes[index..].to_vec()
+            } else {
+                Vec::new()
+            };
             let mut head_c = Vec::new();
             let mut tail_c = Vec::new();
             for comment in comments {
-                if comment.is_standalone || comment.is_multiline() {
-                    head_c.push(comment.clone());
-                } else {
+                let prev_in_head = comment.previous_node.map_or(false, |prev_idx| {
+                    new_nodes.contains(&prev_idx)
+                });
+                let prev_in_remaining = comment.previous_node.map_or(false, |prev_idx| {
+                    remaining_nodes.contains(&prev_idx)
+                });
+
+                if prev_in_head {
+                    if comment.is_inline() {
+                        head_c.push(comment.clone());
+                    } else {
+                        // Standalone comment after a head node → goes to next line
+                        tail_c.push(comment.clone());
+                    }
+                } else if prev_in_remaining {
                     tail_c.push(comment.clone());
+                } else {
+                    // Orphaned: previous_node was in an earlier split → attach to head
+                    head_c.push(comment.clone());
                 }
             }
             (head_c, tail_c)

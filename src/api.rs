@@ -278,6 +278,8 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
             let normalized = normalized.replace('\'', "\"");
             // Normalize operator spacing (+ | ~) so a+b and a + b compare equal
             let normalized = normalize_jinja_operators(&normalized);
+            // Normalize structural chars so multiline formatting compares equal
+            let normalized = normalize_jinja_structure(&normalized);
             format!("{{{{ {} }}}}", normalized)
         }
         TokenType::JinjaStatement
@@ -293,6 +295,10 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
             // Normalize all internal whitespace (including newlines) and quotes
             let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
             let normalized = normalized.replace('\'', "\"");
+            // Normalize operator spacing (+ | ~) so a|b and a | b compare equal
+            let normalized = normalize_jinja_operators(&normalized);
+            // Normalize structural chars so multiline formatting compares equal
+            let normalized = normalize_jinja_structure(&normalized);
             format!("{{% {} %}}", normalized)
         }
         _ => {
@@ -300,6 +306,79 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
             text.split_whitespace().collect::<Vec<_>>().join(" ")
         }
     }
+}
+
+/// Normalize structural characters in Jinja content for equivalence.
+/// Removes spaces after `(` and `[`, spaces before `)` and `]`,
+/// trailing commas before `)` and `]`, and normalizes comma spacing.
+/// Respects string literals.
+fn normalize_jinja_structure(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut result = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Skip strings
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            let quote = bytes[i];
+            result.push(quote as char);
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    result.push(bytes[i] as char);
+                    result.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+            if i < bytes.len() {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+            continue;
+        }
+
+        // After ( or [, skip spaces
+        if bytes[i] == b'(' || bytes[i] == b'[' {
+            result.push(bytes[i] as char);
+            i += 1;
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Before ) or ], remove trailing spaces and trailing comma from result
+        if bytes[i] == b')' || bytes[i] == b']' {
+            // Remove trailing whitespace
+            let trimmed = result.trim_end().len();
+            result.truncate(trimmed);
+            // Remove trailing comma
+            if result.ends_with(',') {
+                result.pop();
+            }
+            result.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+
+        // After comma, normalize to exactly no space (we strip all optional spaces)
+        if bytes[i] == b',' {
+            result.push(',');
+            i += 1;
+            // Skip spaces after comma
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            continue;
+        }
+
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
 }
 
 /// Normalize operator spacing inside Jinja content for equivalence comparison.

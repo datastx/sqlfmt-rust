@@ -18,6 +18,9 @@ static JINJA_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_jinja_rules);
 /// Cached compiled fmt:off rules.
 static FMT_OFF_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::fmt_off_rules);
 
+/// Cached compiled jinja set block rules.
+static JINJA_SET_BLOCK_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::jinja_set_block_rules);
+
 /// Cached compiled unsupported DDL rules.
 static UNSUPPORTED_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_unsupported_rules);
 
@@ -41,6 +44,11 @@ pub fn main_rules() -> Vec<Rule> {
 /// Get the FMT_OFF rule set, cloned from a cached compiled version.
 pub fn fmt_off_rules() -> Vec<Rule> {
     FMT_OFF_RULES.clone()
+}
+
+/// Get the Jinja set block rule set, cloned from a cached compiled version.
+pub fn jinja_set_block_rules() -> Vec<Rule> {
+    JINJA_SET_BLOCK_RULES.clone()
 }
 
 /// Get the UNSUPPORTED DDL rule set.

@@ -342,6 +342,12 @@ impl Analyzer {
                 self.add_node(prefix, token_text, TokenType::JinjaBlockStart);
                 let last_idx = self.arena.len() - 1;
                 self.node_manager.push_jinja_block(last_idx);
+                // For {% set x %} blocks (without =), switch to set block rules
+                // to preserve content as data until {% endset %}
+                let lower = token_text.to_lowercase();
+                if lower.contains("set") && !lower.contains('=') {
+                    self.push_rules(crate::rules::jinja_set_block_rules());
+                }
                 self.pos += match_len;
             }
 
@@ -355,6 +361,11 @@ impl Analyzer {
             }
 
             Action::HandleJinjaBlockEnd => {
+                // Pop set block rules if we were inside a set block
+                let lower = token_text.to_lowercase();
+                if lower.contains("endset") && self.rule_stack.len() > 1 {
+                    self.pop_rules();
+                }
                 self.node_manager.pop_jinja_block();
                 self.add_node(prefix, token_text, TokenType::JinjaBlockEnd);
                 self.pos += match_len;

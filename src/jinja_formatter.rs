@@ -41,16 +41,32 @@ impl JinjaFormatter {
             }
         }
 
-        // After normalization, check if any Jinja expression needs multiline formatting
+        // After normalization, check if any Jinja tags need multiline formatting
         for &idx in &line.nodes {
             let node = &arena[idx];
-            if node.token.token_type == TokenType::JinjaExpression {
-                let line_len = base_indent + node.value.len();
-                if line_len > self.max_length && !node.value.contains('\n') {
-                    if let Some(multiline) = self.format_expression_multiline(&node.value, base_indent) {
+            let line_len = base_indent + node.value.len();
+            if line_len <= self.max_length || node.value.contains('\n') {
+                continue;
+            }
+            match node.token.token_type {
+                TokenType::JinjaExpression => {
+                    if let Some(multiline) =
+                        self.format_expression_multiline(&node.value, base_indent)
+                    {
                         arena[idx].value = multiline;
                     }
                 }
+                TokenType::JinjaStatement
+                | TokenType::JinjaBlockStart
+                | TokenType::JinjaBlockEnd
+                | TokenType::JinjaBlockKeyword => {
+                    if let Some(multiline) =
+                        self.format_statement_multiline(&node.value, base_indent)
+                    {
+                        arena[idx].value = multiline;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -75,17 +91,26 @@ impl JinjaFormatter {
         };
         let inner = inner.trim();
 
-        // If already multiline, preserve the structure
-        if inner.contains('\n') {
+        // If already multiline with complex content (triple quotes, dicts),
+        // preserve the structure since we can't safely re-format these
+        if inner.contains('\n')
+            && (inner.contains("\"\"\"")
+                || inner.contains("'''")
+                || inner.contains('{'))
+        {
             return None;
         }
 
-        // Normalize whitespace (collapse internal whitespace)
+        // Normalize whitespace (collapse internal whitespace including newlines)
         let inner = Self::normalize_inner_whitespace(inner);
         // Normalize quotes (single → double) matching black's behavior
         let inner = Self::normalize_quotes(&inner);
         // Add spaces around operators
         let inner = Self::add_operator_spaces(&inner);
+        // Add spaces after commas
+        let inner = Self::add_comma_spaces(&inner);
+        // Strip spaces inside parens/brackets
+        let inner = Self::strip_paren_spaces(&inner);
 
         Some(format!("{} {} {}", open, inner, close))
     }
@@ -108,7 +133,29 @@ impl JinjaFormatter {
         } else {
             ("%}", inner)
         };
-        let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
+        let inner = inner.trim();
+
+        // If already multiline with complex content (triple quotes, dicts),
+        // preserve the structure
+        if inner.contains('\n')
+            && (inner.contains("\"\"\"")
+                || inner.contains("'''")
+                || inner.contains('{'))
+        {
+            return None;
+        }
+
+        // Normalize whitespace (collapse internal whitespace, respecting strings)
+        let normalized = Self::normalize_inner_whitespace(inner);
+        // Normalize quotes (single → double) matching black's behavior
+        let normalized = Self::normalize_quotes(&normalized);
+        // Add spaces around operators
+        let normalized = Self::add_operator_spaces(&normalized);
+        // Add spaces after commas
+        let normalized = Self::add_comma_spaces(&normalized);
+        // Strip spaces inside parens/brackets
+        let normalized = Self::strip_paren_spaces(&normalized);
+
         Some(format!("{} {} {}", open, normalized, close))
     }
 
@@ -381,6 +428,116 @@ impl JinjaFormatter {
         result
     }
 
+    /// Strip spaces immediately after `(` and `[`, and before `)` and `]`.
+    /// Matches black's behavior of removing whitespace inside brackets.
+    fn strip_paren_spaces(content: &str) -> String {
+        let bytes = content.as_bytes();
+        let mut result = String::with_capacity(content.len());
+        let mut i = 0;
+
+        while i < bytes.len() {
+            // Skip strings
+            if bytes[i] == b'\'' || bytes[i] == b'"' {
+                let quote = bytes[i];
+                result.push(quote as char);
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        result.push(bytes[i] as char);
+                        result.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                continue;
+            }
+
+            // After ( or [, skip spaces
+            if bytes[i] == b'(' || bytes[i] == b'[' {
+                result.push(bytes[i] as char);
+                i += 1;
+                while i < bytes.len() && bytes[i] == b' ' {
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Before ) or ], remove trailing spaces from result
+            if bytes[i] == b')' || bytes[i] == b']' {
+                let trimmed = result.trim_end().len();
+                result.truncate(trimmed);
+                result.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+        result
+    }
+
+    /// Add spaces after commas in Jinja content (like black).
+    /// Ensures `func(a,b)` becomes `func(a, b)`.
+    /// Does NOT modify commas inside string literals.
+    fn add_comma_spaces(content: &str) -> String {
+        let bytes = content.as_bytes();
+        let mut result = String::with_capacity(content.len() + 16);
+        let mut i = 0;
+
+        while i < bytes.len() {
+            // Skip strings
+            if bytes[i] == b'\'' || bytes[i] == b'"' {
+                let quote = bytes[i];
+                result.push(quote as char);
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        result.push(bytes[i] as char);
+                        result.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                continue;
+            }
+
+            if bytes[i] == b',' {
+                result.push(',');
+                i += 1;
+                // Skip existing spaces after comma
+                while i < bytes.len() && bytes[i] == b' ' {
+                    i += 1;
+                }
+                // Add exactly one space (unless at end or before closing bracket)
+                if i < bytes.len()
+                    && bytes[i] != b')'
+                    && bytes[i] != b']'
+                    && bytes[i] != b'}'
+                {
+                    result.push(' ');
+                }
+                continue;
+            }
+
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+        result
+    }
+
     /// Format a Jinja expression as multiline when it would exceed max_length.
     /// Produces output like:
     /// ```
@@ -446,7 +603,83 @@ impl JinjaFormatter {
         // No function call pattern — try simple multiline with content on its own line
         let indent1 = " ".repeat(base_indent + 4);
         let close_indent = " ".repeat(base_indent);
-        Some(format!("{}\n{}{}\n{}{}", open, indent1, inner, close_indent, close))
+        Some(format!(
+            "{}\n{}{}\n{}{}",
+            open, indent1, inner, close_indent, close
+        ))
+    }
+
+    /// Format a Jinja statement as multiline when it would exceed max_length.
+    /// Handles tags like `{% macro name(arg1, arg2, ...) %}` and
+    /// `{% call name(arg1, arg2, ...) %}`.
+    /// Produces output like:
+    /// ```
+    /// {% macro name(
+    ///     arg1,
+    ///     arg2,
+    /// ) %}
+    /// ```
+    fn format_statement_multiline(&self, value: &str, base_indent: usize) -> Option<String> {
+        let trimmed = value.trim();
+
+        // Determine the tag type ({%, {%-, etc.)
+        let (open_delim, inner, close_delim) = if trimmed.starts_with("{%-") {
+            if trimmed.ends_with("-%}") {
+                ("{%-", &trimmed[3..trimmed.len() - 3], "-%}")
+            } else if trimmed.ends_with("%}") {
+                ("{%-", &trimmed[3..trimmed.len() - 2], "%}")
+            } else {
+                return None;
+            }
+        } else if trimmed.starts_with("{%") {
+            if trimmed.ends_with("-%}") {
+                ("{%", &trimmed[2..trimmed.len() - 3], "-%}")
+            } else if trimmed.ends_with("%}") {
+                ("{%", &trimmed[2..trimmed.len() - 2], "%}")
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        let inner = inner.trim();
+
+        // Look for function call pattern: keyword name(args)
+        if let Some(paren_pos) = find_top_level_paren(inner) {
+            if inner.ends_with(')') {
+                let before_paren = &inner[..paren_pos];
+                let args_content = &inner[paren_pos + 1..inner.len() - 1];
+                let args = split_by_commas(args_content);
+
+                if args.len() <= 1 {
+                    return None;
+                }
+
+                let indent1 = " ".repeat(base_indent + 4);
+
+                let mut lines = Vec::new();
+                lines.push(format!("{} {}(", open_delim, before_paren));
+                for arg in &args {
+                    let trimmed_arg = arg.trim();
+                    if !trimmed_arg.is_empty() {
+                        lines.push(format!("{}{},", indent1, trimmed_arg));
+                    }
+                }
+                // Last arg: remove trailing comma if the original didn't have one
+                if let Some(last) = lines.last_mut() {
+                    if last.ends_with(',') && !args_content.trim().ends_with(',') {
+                        last.pop(); // remove trailing comma
+                    }
+                }
+                let close_indent = " ".repeat(base_indent);
+                lines.push(format!("{}) {}", close_indent, close_delim));
+
+                return Some(lines.join("\n"));
+            }
+        }
+
+        None
     }
 }
 
