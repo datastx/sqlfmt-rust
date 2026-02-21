@@ -141,12 +141,18 @@ fn main() {
         reset_cache: cli.reset_cache,
     };
 
-    // Build the tokio runtime, optionally setting worker_threads.
+    // Build the tokio runtime, capping both async workers and blocking threads.
+    let num_threads = if mode.threads > 0 {
+        mode.threads
+    } else {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+    };
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if mode.threads > 0 {
-        builder.worker_threads(mode.threads);
-    }
+    builder.worker_threads(num_threads);
+    builder.max_blocking_threads(num_threads);
     let runtime = builder.build().expect("failed to build tokio runtime");
 
     runtime.block_on(async_main(cli.files, mode, is_stdin));

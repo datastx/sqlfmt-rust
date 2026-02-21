@@ -20,7 +20,7 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 anyhow = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync"] }
 indicatif = "0.17"
 similar = "2"
 dirs = "6"
