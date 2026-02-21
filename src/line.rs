@@ -136,8 +136,7 @@ impl Line {
 
         // Render the main line content
         let base = self.render(arena);
-        let has_only_newline_node =
-            self.nodes.len() == 1 && arena[self.nodes[0]].is_newline();
+        let has_only_newline_node = self.nodes.len() == 1 && arena[self.nodes[0]].is_newline();
         if has_only_newline_node && !result.is_empty() {
             // If the line has only a newline node but we wrote comments,
             // just return comments (don't add the extra newline)
