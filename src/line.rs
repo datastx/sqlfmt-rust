@@ -91,7 +91,7 @@ impl Line {
         if self.has_formatting_disabled() {
             return self.render_formatting_disabled(arena);
         }
-        let mut result = String::new();
+        let mut result = String::with_capacity(self.indent_size(arena) + 80);
         let mut first_content = true;
         for &idx in &self.nodes {
             let node = &arena[idx];

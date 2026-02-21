@@ -36,8 +36,8 @@ impl LineMerger {
 
                 if segments.len() > 1 {
                     let segments = self.fix_standalone_operators(segments, arena);
-                    let tiers = OperatorPrecedence::tiers().to_vec();
-                    let segments = self.maybe_merge_operators(segments, tiers, arena);
+                    let segments =
+                        self.maybe_merge_operators(segments, OperatorPrecedence::tiers(), arena);
                     let segments = self.maybe_stubbornly_merge(segments, arena);
                     for segment in &segments {
                         merged_lines.extend(self.maybe_merge_lines(&segment.lines, arena));
@@ -431,15 +431,16 @@ impl LineMerger {
     fn maybe_merge_operators(
         &self,
         segments: Vec<Segment>,
-        mut op_tiers: Vec<OperatorPrecedence>,
+        op_tiers: &[OperatorPrecedence],
         arena: &[Node],
     ) -> Vec<Segment> {
-        let Some(precedence) = op_tiers.pop() else {
+        let Some(&precedence) = op_tiers.last() else {
             return segments;
         };
         if segments.len() <= 1 {
             return segments;
         }
+        let remaining_tiers = &op_tiers[..op_tiers.len() - 1];
         let mut new_segments: Vec<Segment> = Vec::new();
         let mut head = 0;
 
@@ -447,13 +448,17 @@ impl LineMerger {
             if !self.segment_continues_operator_sequence(&segments[i], precedence, arena) {
                 new_segments.extend(self.try_merge_operator_segments(
                     &segments[head..i],
-                    op_tiers.clone(),
+                    remaining_tiers,
                     arena,
                 ));
                 head = i;
             }
         }
-        new_segments.extend(self.try_merge_operator_segments(&segments[head..], op_tiers, arena));
+        new_segments.extend(self.try_merge_operator_segments(
+            &segments[head..],
+            remaining_tiers,
+            arena,
+        ));
 
         new_segments
     }
@@ -565,7 +570,7 @@ impl LineMerger {
     fn try_merge_operator_segments(
         &self,
         segments: &[Segment],
-        op_tiers: Vec<OperatorPrecedence>,
+        op_tiers: &[OperatorPrecedence],
         arena: &[Node],
     ) -> Vec<Segment> {
         if segments.len() <= 1 {
@@ -599,7 +604,7 @@ impl LineMerger {
                 OperatorPrecedence::OtherTight,
                 arena,
             ) {
-                new_segments = self.stubbornly_merge(&new_segments, &segment, arena);
+                new_segments = self.stubbornly_merge(new_segments, segment, arena);
             } else {
                 new_segments.push(segment);
             }
@@ -628,7 +633,7 @@ impl LineMerger {
                 && Segment::new(self.safe_create_merged_line(&segment.lines, arena))
                     .tail_closes_head(arena)
             {
-                new_segments = self.stubbornly_merge(&new_segments, &segment, arena);
+                new_segments = self.stubbornly_merge(new_segments, segment, arena);
             } else {
                 new_segments.push(segment);
             }
@@ -639,19 +644,23 @@ impl LineMerger {
         }
 
         // Phase 3 needs indexed access for look-ahead (segments.get(i + 1)),
-        // so we keep indexed iteration here.
-        let segments = new_segments;
+        // so we consume via drain to avoid cloning.
+        let mut segments = new_segments;
         let mut new_segments = Vec::with_capacity(segments.len());
-        new_segments.push(segments[0].clone());
+        // Take first element by swap-remove pattern
+        let first = std::mem::replace(&mut segments[0], Segment::new(Vec::new()));
+        new_segments.push(first);
         for i in 1..segments.len() {
             let prev = new_segments
                 .last()
                 .expect("new_segments initialized with segments[0]");
             let next = segments.get(i + 1);
             if self.segment_should_stubbornly_merge(&segments[i], prev, next, arena) {
-                new_segments = self.stubbornly_merge(&new_segments, &segments[i], arena);
+                let seg = std::mem::replace(&mut segments[i], Segment::new(Vec::new()));
+                new_segments = self.stubbornly_merge(new_segments, seg, arena);
             } else {
-                new_segments.push(segments[i].clone());
+                let seg = std::mem::replace(&mut segments[i], Segment::new(Vec::new()));
+                new_segments.push(seg);
             }
         }
 
@@ -659,30 +668,29 @@ impl LineMerger {
     }
 
     /// Attempt several methods of merging a segment with the previous segments.
+    /// Takes ownership of both `prev_segments` and `segment` to avoid cloning.
     fn stubbornly_merge(
         &self,
-        prev_segments: &[Segment],
-        segment: &Segment,
+        mut prev_segments: Vec<Segment>,
+        segment: Segment,
         arena: &[Node],
     ) -> Vec<Segment> {
-        let mut new_segments = prev_segments.to_vec();
-        let prev_segment = match new_segments.pop() {
+        let prev_segment = match prev_segments.pop() {
             Some(s) => s,
             None => {
-                new_segments.push(segment.clone());
-                return new_segments;
+                prev_segments.push(segment);
+                return prev_segments;
             }
         };
 
-        let head = match segment.head(arena) {
+        let (head_idx, head_line) = match segment.head(arena) {
             Ok((head_idx, head_line)) => (head_idx, head_line.clone()),
             Err(_) => {
-                new_segments.push(prev_segment);
-                new_segments.push(segment.clone());
-                return new_segments;
+                prev_segments.push(prev_segment);
+                prev_segments.push(segment);
+                return prev_segments;
             }
         };
-        let (head_idx, head_line) = head;
 
         let mut try_lines = Vec::with_capacity(prev_segment.lines.len() + 1);
         try_lines.extend_from_slice(&prev_segment.lines);
@@ -692,8 +700,8 @@ impl LineMerger {
             result_seg
                 .lines
                 .extend_from_slice(&segment.lines[head_idx + 1..]);
-            new_segments.push(result_seg);
-            return new_segments;
+            prev_segments.push(result_seg);
+            return prev_segments;
         }
 
         if let Ok((tail_idx, tail_line)) = prev_segment.tail(arena) {
@@ -704,8 +712,8 @@ impl LineMerger {
                 let tail_start = prev_segment.lines.len() - 1 - tail_idx;
                 let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
                 result_seg.lines.extend(merged);
-                new_segments.push(result_seg);
-                return new_segments;
+                prev_segments.push(result_seg);
+                return prev_segments;
             }
 
             let try_lines = vec![tail_line.clone(), head_line];
@@ -716,14 +724,14 @@ impl LineMerger {
                 result_seg
                     .lines
                     .extend_from_slice(&segment.lines[head_idx + 1..]);
-                new_segments.push(result_seg);
-                return new_segments;
+                prev_segments.push(result_seg);
+                return prev_segments;
             }
         }
 
-        new_segments.push(prev_segment);
-        new_segments.push(segment.clone());
-        new_segments
+        prev_segments.push(prev_segment);
+        prev_segments.push(segment);
+        prev_segments
     }
 }
 

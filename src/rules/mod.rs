@@ -6,9 +6,15 @@ use crate::action::Action;
 use crate::rule::Rule;
 use crate::token::TokenType;
 
+/// Leak an Action onto the heap, returning a `&'static Action` reference.
+/// Used in rule definitions to create static references for nested actions.
+/// Each call leaks ~32 bytes once during program initialization (in LazyLock).
+fn leak(action: Action) -> &'static Action {
+    Box::leak(Box::new(action))
+}
+
 /// Cached compiled main rules. Regex compilation is expensive (~50 patterns),
-/// so we compile once and clone on each access. Regex::clone() is O(1) since
-/// it uses Arc internally.
+/// so we compile once and return static references on each access.
 static MAIN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_main_rules);
 
 /// Cached compiled fmt:off rules.
@@ -35,49 +41,49 @@ static WAREHOUSE_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_warehouse_rule
 /// Cached compiled CLONE rules.
 static CLONE_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_clone_rules);
 
-/// Get the MAIN rule set, cloned from a cached compiled version.
-pub fn main_rules() -> Vec<Rule> {
-    MAIN_RULES.clone()
+/// Get the MAIN rule set as a static reference.
+pub fn main_rules() -> &'static [Rule] {
+    &MAIN_RULES
 }
 
-/// Get the FMT_OFF rule set, cloned from a cached compiled version.
-pub fn fmt_off_rules() -> Vec<Rule> {
-    FMT_OFF_RULES.clone()
+/// Get the FMT_OFF rule set as a static reference.
+pub fn fmt_off_rules() -> &'static [Rule] {
+    &FMT_OFF_RULES
 }
 
-/// Get the Jinja set block rule set, cloned from a cached compiled version.
-pub fn jinja_set_block_rules() -> Vec<Rule> {
-    JINJA_SET_BLOCK_RULES.clone()
+/// Get the Jinja set block rule set as a static reference.
+pub fn jinja_set_block_rules() -> &'static [Rule] {
+    &JINJA_SET_BLOCK_RULES
 }
 
-/// Get the Jinja call block rule set, cloned from a cached compiled version.
-pub fn jinja_call_block_rules() -> Vec<Rule> {
-    JINJA_CALL_BLOCK_RULES.clone()
+/// Get the Jinja call block rule set as a static reference.
+pub fn jinja_call_block_rules() -> &'static [Rule] {
+    &JINJA_CALL_BLOCK_RULES
 }
 
-/// Get the UNSUPPORTED DDL rule set.
-pub fn unsupported_rules() -> Vec<Rule> {
-    UNSUPPORTED_RULES.clone()
+/// Get the UNSUPPORTED DDL rule set as a static reference.
+pub fn unsupported_rules() -> &'static [Rule] {
+    &UNSUPPORTED_RULES
 }
 
-/// Get the GRANT DDL rule set.
-pub fn grant_rules() -> Vec<Rule> {
-    GRANT_RULES.clone()
+/// Get the GRANT DDL rule set as a static reference.
+pub fn grant_rules() -> &'static [Rule] {
+    &GRANT_RULES
 }
 
-/// Get the FUNCTION DDL rule set.
-pub fn function_rules() -> Vec<Rule> {
-    FUNCTION_RULES.clone()
+/// Get the FUNCTION DDL rule set as a static reference.
+pub fn function_rules() -> &'static [Rule] {
+    &FUNCTION_RULES
 }
 
-/// Get the WAREHOUSE DDL rule set.
-pub fn warehouse_rules() -> Vec<Rule> {
-    WAREHOUSE_RULES.clone()
+/// Get the WAREHOUSE DDL rule set as a static reference.
+pub fn warehouse_rules() -> &'static [Rule] {
+    &WAREHOUSE_RULES
 }
 
-/// Get the CLONE DDL rule set.
-pub fn clone_rules() -> Vec<Rule> {
-    CLONE_RULES.clone()
+/// Get the CLONE DDL rule set as a static reference.
+pub fn clone_rules() -> &'static [Rule] {
+    &CLONE_RULES
 }
 
 /// Build rules for unsupported DDL passthrough.
@@ -101,7 +107,7 @@ fn build_unsupported_rules() -> Vec<Rule> {
         1000,
         r"([^;\n]+)",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::Data,
             }),
         },
@@ -130,7 +136,7 @@ fn build_grant_rules() -> Vec<Rule> {
         1300,
         &format!(r"({})\b", pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -147,7 +153,7 @@ fn build_function_rules() -> Vec<Rule> {
         1100,
         r"(as)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleDdlAs),
+            inner: leak(Action::HandleDdlAs),
         },
     ));
     // Word operators
@@ -156,7 +162,7 @@ fn build_function_rules() -> Vec<Rule> {
         1200,
         r"(to|from|runtime_version)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::WordOperator,
             }),
         },
@@ -217,7 +223,7 @@ fn build_function_rules() -> Vec<Rule> {
         1300,
         &format!(r"({})\b", pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -262,7 +268,7 @@ fn build_warehouse_rules() -> Vec<Rule> {
         1300,
         &format!(r"({})\b", pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -284,7 +290,7 @@ fn build_clone_rules() -> Vec<Rule> {
         1300,
         &format!(r"({})\b", pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -295,7 +301,7 @@ fn build_clone_rules() -> Vec<Rule> {
         1500,
         r"(at|before)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::WordOperator,
             }),
         },
@@ -316,7 +322,7 @@ fn build_main_rules() -> Vec<Rule> {
         1000,
         r"(case)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::StatementStart,
             }),
         },
@@ -327,7 +333,7 @@ fn build_main_rules() -> Vec<Rule> {
         1010,
         r"(end)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::SafeAddNode {
+            inner: leak(Action::SafeAddNode {
                 token_type: TokenType::StatementEnd,
                 alt_token_type: TokenType::Name,
             }),
@@ -344,8 +350,8 @@ fn build_main_rules() -> Vec<Rule> {
         1040,
         r"(select\s+into)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::AddNode {
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::AddNode {
                     token_type: TokenType::UntermKeyword,
                 }),
             }),
@@ -371,7 +377,7 @@ fn build_main_rules() -> Vec<Rule> {
         1045,
         r"(from)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -383,7 +389,7 @@ fn build_main_rules() -> Vec<Rule> {
         1048,
         r"(using)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -493,7 +499,7 @@ fn build_main_rules() -> Vec<Rule> {
         1050,
         &format!(r"({})\b", unterm_pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -507,7 +513,7 @@ fn build_main_rules() -> Vec<Rule> {
         1120,
         r"(on)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::On,
             }),
         },
@@ -589,7 +595,7 @@ fn build_main_rules() -> Vec<Rule> {
         1100,
         &format!(r"({})\b", word_op_pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::WordOperator,
             }),
         },
@@ -602,7 +608,7 @@ fn build_main_rules() -> Vec<Rule> {
         1101,
         r"((?:except|exclude|replace)\s*\()",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleKeywordBeforeParen {
+            inner: leak(Action::HandleKeywordBeforeParen {
                 token_type: TokenType::WordOperator,
             }),
         },
@@ -614,7 +620,7 @@ fn build_main_rules() -> Vec<Rule> {
         1200,
         r"(and|or|not)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::BooleanOperator,
             }),
         },
@@ -627,7 +633,7 @@ fn build_main_rules() -> Vec<Rule> {
         1305,
         &format!(r"({})", frame_pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -641,7 +647,7 @@ fn build_main_rules() -> Vec<Rule> {
         1310,
         r"(offset)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::AddNode {
+            inner: leak(Action::AddNode {
                 token_type: TokenType::UntermKeyword,
             }),
         },
@@ -677,7 +683,7 @@ fn build_main_rules() -> Vec<Rule> {
         1320,
         &format!(r"({})\b", set_op_pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleSetOperator),
+            inner: leak(Action::HandleSetOperator),
         },
     ));
 
@@ -689,8 +695,8 @@ fn build_main_rules() -> Vec<Rule> {
         2000,
         r"(explain(?:\s+(?:analyze|verbose|using))?)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::AddNode {
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::AddNode {
                     token_type: TokenType::UntermKeyword,
                 }),
             }),
@@ -703,9 +709,9 @@ fn build_main_rules() -> Vec<Rule> {
         2010,
         r"(grant|revoke)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::LexRuleset {
-                    ruleset_name: "grant".to_string(),
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::LexRuleset {
+                    ruleset_name: "grant",
                 }),
             }),
         },
@@ -717,9 +723,9 @@ fn build_main_rules() -> Vec<Rule> {
         2015,
         r"(create(?:\s+or\s+replace)?\s+(?:database|schema|table|stage|file\s+format|sequence|stream|task)(?:\s+if\s+not\s+exists)?\s+\S+\s+clone)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::LexRuleset {
-                    ruleset_name: "clone".to_string(),
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::LexRuleset {
+                    ruleset_name: "clone",
                 }),
             }),
         },
@@ -731,9 +737,9 @@ fn build_main_rules() -> Vec<Rule> {
         2020,
         r"(create(?:\s+or\s+replace)?(?:\s+temp(?:orary)?)?(?:\s+secure)?(?:\s+external)?(?:\s+table)?\s+function(?:\s+if\s+not\s+exists)?|(?:alter|drop)\s+function(?:\s+if\s+exists)?)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::LexRuleset {
-                    ruleset_name: "function".to_string(),
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::LexRuleset {
+                    ruleset_name: "function",
                 }),
             }),
         },
@@ -745,9 +751,9 @@ fn build_main_rules() -> Vec<Rule> {
         2030,
         r"(create(?:\s+or\s+replace)?\s+warehouse(?:\s+if\s+not\s+exists)?|alter\s+warehouse(?:\s+if\s+exists)?)\b",
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::LexRuleset {
-                    ruleset_name: "warehouse".to_string(),
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::LexRuleset {
+                    ruleset_name: "warehouse",
                 }),
             }),
         },
@@ -829,9 +835,9 @@ fn build_main_rules() -> Vec<Rule> {
         2999,
         &format!(r"({})\b", ddl_pattern),
         Action::HandleReservedKeyword {
-            inner: Box::new(Action::HandleNonreservedTopLevelKeyword {
-                inner: Box::new(Action::LexRuleset {
-                    ruleset_name: "unsupported".to_string(),
+            inner: leak(Action::HandleNonreservedTopLevelKeyword {
+                inner: leak(Action::LexRuleset {
+                    ruleset_name: "unsupported",
                 }),
             }),
         },

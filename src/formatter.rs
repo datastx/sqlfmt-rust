@@ -48,8 +48,9 @@ impl QueryFormatter {
     /// Stage 1: Split lines based on SQL structure.
     fn split_lines(&self, query: &mut Query, arena: &mut Vec<Node>) {
         let splitter = LineSplitter::new();
-        let mut new_lines = Vec::new();
-        for line in &query.lines {
+        let old_lines = std::mem::take(&mut query.lines);
+        let mut new_lines = Vec::with_capacity(old_lines.len() * 2);
+        for line in old_lines {
             new_lines.extend(splitter.maybe_split(line, arena));
         }
         query.lines = new_lines;
