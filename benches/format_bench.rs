@@ -59,12 +59,51 @@ fn bench_format_no_safety(c: &mut Criterion) {
     });
 }
 
+/// Measures the cost of safety check in isolation by computing the difference
+/// between format_large (with safety) and format_no_safety (without).
+/// Both are benchmarked here side-by-side for easy comparison in Criterion output.
+fn bench_safety_check_overhead(c: &mut Criterion) {
+    let sql = load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
+
+    let mut group = c.benchmark_group("safety_check_overhead");
+
+    let mode_with = Mode::default();
+    group.bench_function("with_safety", |b| {
+        b.iter(|| format_string(black_box(&sql), black_box(&mode_with)).unwrap())
+    });
+
+    let mode_without = Mode {
+        fast: true,
+        ..Mode::default()
+    };
+    group.bench_function("without_safety", |b| {
+        b.iter(|| format_string(black_box(&sql), black_box(&mode_without)).unwrap())
+    });
+
+    group.finish();
+}
+
+/// Benchmark formatting already-formatted output (idempotent pass).
+/// This isolates the safety check path since formatting is a near-no-op.
+fn bench_format_idempotent(c: &mut Criterion) {
+    let sql = load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
+    let mode = Mode::default();
+    // Pre-format once to get idempotent input
+    let formatted = format_string(&sql, &mode).unwrap();
+
+    c.bench_function("format_idempotent", |b| {
+        b.iter(|| format_string(black_box(&formatted), black_box(&mode)).unwrap())
+    });
+}
+
 criterion_group!(
     benches,
     bench_format_small,
     bench_format_medium,
     bench_format_large,
     bench_lex_only,
-    bench_format_no_safety
+    bench_format_no_safety,
+    bench_safety_check_overhead,
+    bench_format_idempotent
 );
 criterion_main!(benches);

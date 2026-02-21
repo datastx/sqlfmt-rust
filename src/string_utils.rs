@@ -38,3 +38,41 @@ pub(crate) fn skip_string_literal(bytes: &[u8], i: usize) -> usize {
     }
     j
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_single_quoted_string() {
+        let bytes = b"'hello' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(pos, 7, "Should return position after closing quote");
+    }
+
+    #[test]
+    fn test_skip_double_quoted_string() {
+        let bytes = b"\"world\" rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(pos, 7, "Should return position after closing double quote");
+    }
+
+    #[test]
+    fn test_skip_escaped_quote() {
+        let bytes = b"'it\\'s' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(
+            pos, 7,
+            "Should handle backslash escape and return correct end"
+        );
+    }
+
+    #[test]
+    fn test_skip_string_literal_into_copies() {
+        let bytes = b"'hello' rest";
+        let mut result = String::new();
+        let pos = skip_string_literal_into(bytes, 0, &mut result);
+        assert_eq!(pos, 7);
+        assert_eq!(result, "'hello'", "Should copy delimiters and content");
+    }
+}

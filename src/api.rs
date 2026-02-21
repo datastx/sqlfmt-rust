@@ -7,6 +7,15 @@ use crate::mode::Mode;
 use crate::report::{FileResult, Report};
 use crate::string_utils::skip_string_literal_into;
 
+/// Lightweight snapshot of a token for safety-check comparison.
+/// Avoids re-lexing the original source by capturing token_type + text
+/// from the first parse pass.
+#[derive(Debug, Clone)]
+struct TokenSnapshot {
+    token_type: crate::token::TokenType,
+    text: String,
+}
+
 /// Format a SQL string according to the given mode.
 /// This is the core API function.
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
@@ -16,13 +25,31 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
     let mut query = analyzer.parse_query(source)?;
     let mut arena = std::mem::take(&mut analyzer.arena);
 
+    // Capture token snapshot before formatting (for safety check reuse).
+    // This avoids re-lexing the original source in safety_check.
+    let original_tokens = if mode.should_safety_check() {
+        Some(
+            query
+                .tokens(&arena)
+                .into_iter()
+                .filter(|n| n.token.token_type != crate::token::TokenType::Newline)
+                .map(|n| TokenSnapshot {
+                    token_type: n.token.token_type,
+                    text: n.token.text.clone(),
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+
     let formatter = QueryFormatter::new(mode.line_length, mode.no_jinjafmt);
     formatter.format(&mut query, &mut arena);
 
     let result = query.render(&arena);
 
-    if mode.should_safety_check() {
-        safety_check(source, &result, mode)?;
+    if let Some(ref orig_tokens) = original_tokens {
+        safety_check(orig_tokens, &result, mode)?;
     }
 
     Ok(result)
@@ -196,24 +223,18 @@ fn collect_sql_files(
 
 /// Perform safety equivalence check: re-lex the formatted output
 /// and verify tokens match the original.
-/// Mirrors Python's safety check which compares Token objects
-/// (type and raw token text, not values which may have been lowercased).
-fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), SqlfmtError> {
+/// Accepts pre-captured token snapshots from the first parse pass,
+/// avoiding a redundant re-lex of the original source (~33% savings).
+fn safety_check(
+    original_tokens: &[TokenSnapshot],
+    formatted: &str,
+    mode: &Mode,
+) -> Result<(), SqlfmtError> {
     use crate::token::TokenType;
 
     let dialect = mode.dialect()?;
-    let mut analyzer1 = dialect.initialize_analyzer(mode.line_length);
     let mut analyzer2 = dialect.initialize_analyzer(mode.line_length);
-
-    let query1 = analyzer1.parse_query(original)?;
     let query2 = analyzer2.parse_query(formatted)?;
-
-    // Collect tokens, skipping whitespace-only tokens (Newline)
-    let tokens1: Vec<_> = query1
-        .tokens(&analyzer1.arena)
-        .into_iter()
-        .filter(|n| n.token.token_type != TokenType::Newline)
-        .collect();
 
     let tokens2: Vec<_> = query2
         .tokens(&analyzer2.arena)
@@ -221,42 +242,42 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
         .filter(|n| n.token.token_type != TokenType::Newline)
         .collect();
 
-    if tokens1.len() != tokens2.len() {
+    if original_tokens.len() != tokens2.len() {
         return Err(SqlfmtError::Equivalence(format!(
             "Token count mismatch: original has {} tokens, formatted has {}",
-            tokens1.len(),
+            original_tokens.len(),
             tokens2.len()
         )));
     }
 
-    for (i, (n1, n2)) in tokens1.iter().zip(tokens2.iter()).enumerate() {
-        if n1.token.token_type != n2.token.token_type {
+    for (i, (s1, n2)) in original_tokens.iter().zip(tokens2.iter()).enumerate() {
+        if s1.token_type != n2.token.token_type {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token type mismatch at position {}: original {:?} '{}', formatted {:?} '{}'",
-                i, n1.token.token_type, n1.token.text, n2.token.token_type, n2.token.text
+                i, s1.token_type, s1.text, n2.token.token_type, n2.token.text
             )));
         }
         // Fast path: if token text is identical, skip normalization entirely
-        if n1.token.text == n2.token.text {
+        if s1.text == n2.token.text {
             continue;
         }
         // Fast path: if case-insensitively equal and single-word non-Jinja, skip
-        if !n1.token.token_type.is_jinja()
-            && !n1.token.text.contains(char::is_whitespace)
+        if !s1.token_type.is_jinja()
+            && !s1.text.contains(char::is_whitespace)
             && !n2.token.text.contains(char::is_whitespace)
-            && n1.token.text.eq_ignore_ascii_case(&n2.token.text)
+            && s1.text.eq_ignore_ascii_case(&n2.token.text)
         {
             continue;
         }
         // Slow path: full normalization needed
-        let t1 = n1.token.text.to_lowercase();
+        let t1 = s1.text.to_lowercase();
         let t2 = n2.token.text.to_lowercase();
-        let t1_norm = normalize_token_text(&t1, n1.token.token_type);
+        let t1_norm = normalize_token_text(&t1, s1.token_type);
         let t2_norm = normalize_token_text(&t2, n2.token.token_type);
         if t1_norm != t2_norm {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token text mismatch at position {}: original '{}', formatted '{}'",
-                i, n1.token.text, n2.token.text
+                i, s1.text, n2.token.text
             )));
         }
     }
@@ -494,5 +515,105 @@ mod tests {
         mode.dialect_name = "duckdb".to_string();
         let result = format_string("SELECT 1\n", &mode).unwrap();
         assert!(result.contains("select"));
+    }
+
+    #[test]
+    fn test_format_bracket_error() {
+        let mode = Mode::default();
+        let result = format_string("SELECT )\n", &mode);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, SqlfmtError::Bracket(_)),
+            "Expected Bracket error, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_format_unterminated_comment_error() {
+        let mode = Mode::default();
+        let result = format_string("/* unclosed\n", &mode);
+        assert!(result.is_err(), "Unterminated comment should error");
+    }
+
+    #[test]
+    fn test_safety_check_valid() {
+        let mode = Mode::default();
+        let source = "select\n    1\n";
+        // Format should succeed and pass safety check
+        let result = format_string(source, &mode);
+        assert!(
+            result.is_ok(),
+            "Well-formatted SQL should pass safety check"
+        );
+    }
+
+    #[test]
+    fn test_is_sql_file_jinja() {
+        let extensions = &["sql", "sql.jinja", "ddl"];
+        assert!(is_sql_file(Path::new("model.sql.jinja"), extensions));
+    }
+
+    #[test]
+    fn test_is_sql_file_non_sql() {
+        let extensions = &["sql", "sql.jinja", "ddl"];
+        assert!(!is_sql_file(Path::new("script.py"), extensions));
+        assert!(!is_sql_file(Path::new("readme.txt"), extensions));
+        assert!(!is_sql_file(Path::new("data.csv"), extensions));
+    }
+
+    #[test]
+    fn test_get_matching_paths_single_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let sql_file = dir.path().join("test.sql");
+        std::fs::write(&sql_file, "SELECT 1\n").unwrap();
+
+        let mode = Mode::default();
+        let paths = get_matching_paths(&[sql_file.clone()], &mode);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], sql_file);
+    }
+
+    #[test]
+    fn test_get_matching_paths_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.sql"), "SELECT 1\n").unwrap();
+        std::fs::write(dir.path().join("b.sql"), "SELECT 2\n").unwrap();
+        std::fs::write(dir.path().join("c.py"), "print(1)").unwrap();
+
+        let mode = Mode::default();
+        let paths = get_matching_paths(&[dir.path().to_path_buf()], &mode);
+        assert_eq!(paths.len(), 2, "Should find only .sql files");
+        assert!(paths.iter().all(|p| p.extension().unwrap() == "sql"));
+    }
+
+    #[test]
+    fn test_get_matching_paths_excludes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.sql"), "SELECT 1\n").unwrap();
+        std::fs::write(dir.path().join("b.sql"), "SELECT 2\n").unwrap();
+
+        let mut mode = Mode::default();
+        mode.exclude = vec!["b.sql".to_string()];
+        let paths = get_matching_paths(&[dir.path().to_path_buf()], &mode);
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[test]
+    fn test_run_empty_files() {
+        let mode = Mode::default();
+        let report = run(&[], &mode);
+        assert_eq!(report.total(), 0);
+        assert!(!report.has_errors());
+        assert!(!report.has_changes());
+    }
+
+    #[test]
+    fn test_normalize_jinja_operators() {
+        // Test that operator spacing is normalized
+        let a = normalize_jinja_operators("a+b");
+        let b = normalize_jinja_operators("a + b");
+        assert_eq!(a, b, "Operator spacing should be normalized identically");
     }
 }
