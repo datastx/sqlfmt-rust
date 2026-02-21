@@ -259,8 +259,7 @@ mod tests {
         assert_eq!(
             line_count, 1,
             "Jinja comment should NOT wrap: got {} lines from: {}",
-            line_count,
-            rendered
+            line_count, rendered
         );
     }
 

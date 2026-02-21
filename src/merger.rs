@@ -80,8 +80,7 @@ impl LineMerger {
                                         if include_end < tail_start {
                                             let inner =
                                                 &only_segment.lines[include_end..tail_start];
-                                            let merged_inner =
-                                                self.maybe_merge_lines(inner, arena);
+                                            let merged_inner = self.maybe_merge_lines(inner, arena);
 
                                             // If head is a JinjaBlockKeyword ({% else %},
                                             // {% elif %}), try to merge it with the first
@@ -104,10 +103,7 @@ impl LineMerger {
                                                     let last_head = merged_lines.pop().unwrap();
                                                     let first_inner = &merged_inner[fci];
                                                     match self.create_merged_line(
-                                                        &[
-                                                            last_head.clone(),
-                                                            first_inner.clone(),
-                                                        ],
+                                                        &[last_head.clone(), first_inner.clone()],
                                                         arena,
                                                     ) {
                                                         Ok(merged) => {
@@ -170,8 +166,7 @@ impl LineMerger {
                 // Find the preceding non-blank, non-comment content line
                 let mut prev_idx = None;
                 for j in (0..i).rev() {
-                    if !lines[j].is_blank_line(arena)
-                        && !lines[j].is_standalone_comment_line(arena)
+                    if !lines[j].is_blank_line(arena) && !lines[j].is_standalone_comment_line(arena)
                     {
                         prev_idx = Some(j);
                         break;
@@ -206,9 +201,7 @@ impl LineMerger {
                             // Also remove blank lines between pi and the
                             // next content (comments/non-blank) that were
                             // separating the comma from the content.
-                            while pi + 1 < lines.len()
-                                && lines[pi + 1].is_blank_line(arena)
-                            {
+                            while pi + 1 < lines.len() && lines[pi + 1].is_blank_line(arena) {
                                 lines.remove(pi + 1);
                             }
                             continue;
@@ -284,7 +277,7 @@ impl LineMerger {
         // Python sqlfmt tracks `has_inline_comment_above` and only allows
         // standalone commas or blank lines after it.
         let mut has_inline_comment_above = false;
-        for (_i, line) in lines.iter().enumerate() {
+        for line in lines.iter() {
             if !line.comments.is_empty() {
                 if has_inline_comment_above {
                     return Err(ControlFlow::CannotMerge);
@@ -293,10 +286,11 @@ impl LineMerger {
                 if has_inline && !line.is_blank_line(arena) {
                     has_inline_comment_above = true;
                 }
-            } else if has_inline_comment_above {
-                if !line.is_standalone_comma(arena) && !line.is_blank_line(arena) {
-                    return Err(ControlFlow::CannotMerge);
-                }
+            } else if has_inline_comment_above
+                && !line.is_standalone_comma(arena)
+                && !line.is_blank_line(arena)
+            {
+                return Err(ControlFlow::CannotMerge);
             }
         }
 
@@ -452,58 +446,6 @@ impl LineMerger {
         Ok((nodes, comments))
     }
 
-    fn extract_leading_blank_lines(lines: &[Line], arena: &[Node]) -> Vec<Line> {
-        let mut blanks = Vec::new();
-        for line in lines {
-            if line.is_blank_line(arena) {
-                blanks.push(line.clone());
-            } else {
-                break;
-            }
-        }
-        blanks
-    }
-
-    /// Extract leading blank lines and standalone comment lines.
-    fn extract_leading_non_content(lines: &[Line], arena: &[Node]) -> Vec<Line> {
-        let mut result = Vec::new();
-        for line in lines {
-            if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
-                result.push(line.clone());
-            } else {
-                break;
-            }
-        }
-        result
-    }
-
-    /// Extract trailing blank lines and standalone comment lines.
-    fn extract_trailing_non_content(lines: &[Line], arena: &[Node]) -> Vec<Line> {
-        let mut result = Vec::new();
-        for line in lines.iter().rev() {
-            if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
-                result.push(line.clone());
-            } else {
-                break;
-            }
-        }
-        result.reverse();
-        result
-    }
-
-    fn extract_trailing_blank_lines(lines: &[Line], arena: &[Node]) -> Vec<Line> {
-        let mut blanks = Vec::new();
-        for line in lines.iter().rev() {
-            if line.is_blank_line(arena) {
-                blanks.push(line.clone());
-            } else {
-                break;
-            }
-        }
-        blanks.reverse();
-        blanks
-    }
-
     /// Fix standalone operators by merging them with the next line.
     fn fix_standalone_operators(&self, mut segments: Vec<Segment>, arena: &[Node]) -> Vec<Segment> {
         for segment in &mut segments {
@@ -606,20 +548,17 @@ impl LineMerger {
                             }
                             // Don't merge if the next segment has multiline Jinja
                             let next_has_multiline = next.lines.iter().any(|l| {
-                                l.nodes
-                                    .iter()
-                                    .any(|&idx| arena[idx].is_multiline_jinja())
+                                l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja())
                             });
                             if next_has_multiline {
                                 return false;
                             }
                         }
                         // Don't merge if the ON segment itself contains multiline Jinja
-                        let has_multiline = segment.lines.iter().any(|l| {
-                            l.nodes
-                                .iter()
-                                .any(|&idx| arena[idx].is_multiline_jinja())
-                        });
+                        let has_multiline = segment
+                            .lines
+                            .iter()
+                            .any(|l| l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja()));
                         if has_multiline {
                             return false;
                         }
@@ -632,8 +571,7 @@ impl LineMerger {
                     {
                         segment.lines.iter().any(|l| {
                             l.nodes.iter().any(|&idx| {
-                                arena[idx].token.token_type
-                                    == crate::token::TokenType::BracketOpen
+                                arena[idx].token.token_type == crate::token::TokenType::BracketOpen
                             })
                         })
                     }

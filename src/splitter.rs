@@ -260,12 +260,12 @@ impl LineSplitter {
             let mut head_c = Vec::new();
             let mut tail_c = Vec::new();
             for comment in comments {
-                let prev_in_head = comment.previous_node.map_or(false, |prev_idx| {
-                    new_nodes.contains(&prev_idx)
-                });
-                let prev_in_remaining = comment.previous_node.map_or(false, |prev_idx| {
-                    remaining_nodes.contains(&prev_idx)
-                });
+                let prev_in_head = comment
+                    .previous_node
+                    .is_some_and(|prev_idx| new_nodes.contains(&prev_idx));
+                let prev_in_remaining = comment
+                    .previous_node
+                    .is_some_and(|prev_idx| remaining_nodes.contains(&prev_idx));
 
                 if prev_in_head {
                     if comment.is_inline() {

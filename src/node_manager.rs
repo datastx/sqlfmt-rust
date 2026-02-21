@@ -46,7 +46,9 @@ impl NodeManager {
             // When formatting is disabled, preserve original whitespace and value
             (token.prefix.clone(), token.token.clone())
         } else {
-            let prefix = self.compute_prefix(&token, previous_node, arena).into_owned();
+            let prefix = self
+                .compute_prefix(&token, previous_node, arena)
+                .into_owned();
             let value = self.standardize_value(&token);
             (prefix, value)
         };
@@ -87,8 +89,8 @@ impl NodeManager {
                 // increase depth for the next node — it's a FROM clause
                 // modifier, not a clause-level keyword.
                 if prev.is_unterm_keyword() || prev.is_opening_bracket() {
-                    let is_lateral_kw = prev.is_unterm_keyword()
-                        && prev.value.eq_ignore_ascii_case("lateral");
+                    let is_lateral_kw =
+                        prev.is_unterm_keyword() && prev.value.eq_ignore_ascii_case("lateral");
                     if !is_lateral_kw {
                         ob.push(prev_idx);
                     }
@@ -219,7 +221,8 @@ impl NodeManager {
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> String {
-        self.compute_prefix(token, previous_node, arena).into_owned()
+        self.compute_prefix(token, previous_node, arena)
+            .into_owned()
     }
 
     /// Compute the whitespace prefix for a token.
@@ -275,8 +278,7 @@ impl NodeManager {
         {
             if let Some(prev_node) = prev {
                 if prev_node.value == "+" || prev_node.value == "-" {
-                    let (prev_prev, _) =
-                        Self::get_previous_token(prev_node.previous_node, arena);
+                    let (prev_prev, _) = Self::get_previous_token(prev_node.previous_node, arena);
                     let is_unary = match prev_prev {
                         None => true,
                         Some(pp) => matches!(
@@ -321,8 +323,17 @@ impl NodeManager {
                 if pv.len() == 1
                     && matches!(
                         pv.as_bytes()[0],
-                        b'r' | b'b' | b'f' | b'u' | b'x' | b'e'
-                            | b'R' | b'B' | b'F' | b'U' | b'X' | b'E'
+                        b'r' | b'b'
+                            | b'f'
+                            | b'u'
+                            | b'x'
+                            | b'e'
+                            | b'R'
+                            | b'B'
+                            | b'F'
+                            | b'U'
+                            | b'X'
+                            | b'E'
                     )
                     && token.token.starts_with('\'')
                 {
@@ -383,8 +394,7 @@ impl NodeManager {
                         return Cow::Borrowed(" ");
                     }
                     if lv == "filter" || lv == "offset" {
-                        let (pp, _) =
-                            Self::get_previous_token(prev_node.previous_node, arena);
+                        let (pp, _) = Self::get_previous_token(prev_node.previous_node, arena);
                         if let Some(pp_node) = pp {
                             if matches!(
                                 pp_node.token.token_type,
@@ -439,18 +449,6 @@ impl NodeManager {
 
         // Default: one space
         Cow::Borrowed(" ")
-    }
-
-    /// Check if a Jinja statement is a block keyword (else/elif) that should
-    /// attach directly to preceding content without a space.
-    fn is_jinja_block_keyword(token_text: &str) -> bool {
-        let inner = token_text
-            .trim_start_matches("{%-")
-            .trim_start_matches("{%")
-            .trim_end_matches("-%}")
-            .trim_end_matches("%}")
-            .trim();
-        inner == "else" || inner.starts_with("elif ")
     }
 
     /// Walk backward through previous_node links, skipping tokens that
@@ -510,138 +508,6 @@ impl NodeManager {
         }
 
         token.token.clone()
-    }
-
-    /// Convert single-quoted strings to double-quoted strings inside Jinja tags.
-    /// Matches Python sqlfmt's jinjafmt behavior (black's quote normalization).
-    /// Skips existing double-quoted strings to avoid corrupting their content.
-    fn convert_jinja_quotes(text: &str) -> String {
-        let bytes = text.as_bytes();
-        let len = bytes.len();
-        let mut result = Vec::with_capacity(len);
-        let mut i = 0;
-
-        while i < len {
-            // Skip double-quoted strings entirely (preserve as-is)
-            if bytes[i] == b'"' {
-                // Check for triple-double-quote (""")
-                if i + 2 < len && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
-                    result.extend_from_slice(b"\"\"\"");
-                    i += 3;
-                    while i < len {
-                        if i + 2 < len
-                            && bytes[i] == b'"'
-                            && bytes[i + 1] == b'"'
-                            && bytes[i + 2] == b'"'
-                        {
-                            result.extend_from_slice(b"\"\"\"");
-                            i += 3;
-                            break;
-                        }
-                        result.push(bytes[i]);
-                        i += 1;
-                    }
-                    continue;
-                }
-                result.push(b'"');
-                i += 1;
-                while i < len && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' && i + 1 < len {
-                        result.push(bytes[i]);
-                        result.push(bytes[i + 1]);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i]);
-                    i += 1;
-                }
-                if i < len {
-                    result.push(bytes[i]);
-                    i += 1;
-                }
-                continue;
-            }
-            if bytes[i] == b'\'' {
-                // Check for triple-single-quote (''')
-                if i + 2 < len && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
-                    let start = i;
-                    i += 3;
-                    let mut contains_double_quote = false;
-                    let mut end = None;
-                    while i < len {
-                        if i + 2 < len
-                            && bytes[i] == b'\''
-                            && bytes[i + 1] == b'\''
-                            && bytes[i + 2] == b'\''
-                        {
-                            end = Some(i + 2);
-                            break;
-                        }
-                        if bytes[i] == b'"' {
-                            contains_double_quote = true;
-                        }
-                        i += 1;
-                    }
-                    if let Some(end_pos) = end {
-                        if contains_double_quote {
-                            result.extend_from_slice(&bytes[start..=end_pos]);
-                        } else {
-                            result.extend_from_slice(b"\"\"\"");
-                            result.extend_from_slice(&bytes[start + 3..end_pos - 2]);
-                            result.extend_from_slice(b"\"\"\"");
-                        }
-                        i = end_pos + 1;
-                    } else {
-                        result.extend_from_slice(&bytes[start..]);
-                        break;
-                    }
-                    continue;
-                }
-                // Found a single-quoted string. Scan to find the closing quote.
-                let start = i;
-                i += 1;
-                let mut contains_double_quote = false;
-                let mut content_end = None;
-                while i < len {
-                    if bytes[i] == b'\\' && i + 1 < len {
-                        if bytes[i + 1] == b'"' {
-                            contains_double_quote = true;
-                        }
-                        i += 2;
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        contains_double_quote = true;
-                    }
-                    if bytes[i] == b'\'' {
-                        content_end = Some(i);
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-
-                if let Some(end) = content_end {
-                    if contains_double_quote {
-                        // Keep single quotes if content contains double quotes
-                        result.extend_from_slice(&bytes[start..=end]);
-                    } else {
-                        // Convert to double quotes
-                        result.push(b'"');
-                        result.extend_from_slice(&bytes[start + 1..end]);
-                        result.push(b'"');
-                    }
-                } else {
-                    // Unterminated string, keep as-is
-                    result.extend_from_slice(&bytes[start..i]);
-                }
-            } else {
-                result.push(bytes[i]);
-                i += 1;
-            }
-        }
-
-        String::from_utf8(result).unwrap_or_else(|_| text.to_string())
     }
 
     /// Enable formatting (handle fmt:on).

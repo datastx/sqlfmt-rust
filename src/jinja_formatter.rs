@@ -177,27 +177,6 @@ impl JinjaFormatter {
         Some(format!("{} {} {}", open, normalized, close))
     }
 
-    /// Normalize a {# comment #} tag.
-    fn normalize_comment(&self, value: &str) -> Option<String> {
-        let trimmed = value.trim();
-        if !trimmed.starts_with("{#") || !trimmed.ends_with("#}") {
-            return None;
-        }
-
-        let inner = trimmed[2..trimmed.len() - 2].trim();
-        let (open, inner) = if let Some(rest) = inner.strip_prefix('-') {
-            ("{#-", rest.trim_start())
-        } else {
-            ("{#", inner)
-        };
-        let (close, inner) = if let Some(rest) = inner.strip_suffix('-') {
-            ("-#}", rest.trim_end())
-        } else {
-            ("#}", inner)
-        };
-        Some(format!("{} {} {}", open, inner.trim(), close))
-    }
-
     /// Normalize internal whitespace in Jinja content, respecting strings.
     /// Collapses runs of whitespace (including newlines) to single spaces,
     /// but preserves whitespace inside string literals.
@@ -520,10 +499,7 @@ impl JinjaFormatter {
                 let trimmed_len = result.trim_end().len();
                 if trimmed_len > 0 {
                     let last_byte = result.as_bytes()[trimmed_len - 1];
-                    if last_byte.is_ascii_alphanumeric()
-                        || last_byte == b'_'
-                        || last_byte == b'.'
-                    {
+                    if last_byte.is_ascii_alphanumeric() || last_byte == b'_' || last_byte == b'.' {
                         result.truncate(trimmed_len);
                     }
                 }
@@ -599,11 +575,7 @@ impl JinjaFormatter {
                     i += 1;
                 }
                 // Add exactly one space (unless at end or before closing bracket)
-                if i < bytes.len()
-                    && bytes[i] != b')'
-                    && bytes[i] != b']'
-                    && bytes[i] != b'}'
-                {
+                if i < bytes.len() && bytes[i] != b')' && bytes[i] != b']' && bytes[i] != b'}' {
                     result.push(' ');
                 }
                 continue;
@@ -617,7 +589,7 @@ impl JinjaFormatter {
 
     /// Format a Jinja expression as multiline when it would exceed max_length.
     /// Produces output like:
-    /// ```
+    /// ```text
     /// {{
     ///     config(
     ///         arg1="val1",
@@ -727,7 +699,7 @@ impl JinjaFormatter {
     /// Handles tags like `{% macro name(arg1, arg2, ...) %}` and
     /// `{% call name(arg1, arg2, ...) %}`.
     /// Produces output like:
-    /// ```
+    /// ```text
     /// {% macro name(
     ///     arg1,
     ///     arg2,
@@ -791,10 +763,7 @@ impl JinjaFormatter {
                 if after_close.is_empty() {
                     lines.push(format!("{}) {}", close_indent, close_delim));
                 } else {
-                    lines.push(format!(
-                        "{}) {} {}",
-                        close_indent, after_close, close_delim
-                    ));
+                    lines.push(format!("{}) {} {}", close_indent, after_close, close_delim));
                 }
 
                 return Some(lines.join("\n"));
@@ -853,7 +822,8 @@ impl JinjaFormatter {
             let indent1 = " ".repeat(base_indent + 4);
             let close_indent = " ".repeat(base_indent);
             return Some(format!(
-                "{} \n{}{}\n{}{}", open_delim, indent1, inner, close_indent, close_delim
+                "{} \n{}{}\n{}{}",
+                open_delim, indent1, inner, close_indent, close_delim
             ));
         }
 
@@ -1165,13 +1135,6 @@ mod tests {
         let formatter = JinjaFormatter::new(88);
         let result = formatter.normalize_expression("{{- my_var -}}");
         assert_eq!(result, Some("{{- my_var -}}".to_string()));
-    }
-
-    #[test]
-    fn test_normalize_comment() {
-        let formatter = JinjaFormatter::new(88);
-        let result = formatter.normalize_comment("{#  comment text  #}");
-        assert_eq!(result, Some("{# comment text #}".to_string()));
     }
 
     #[test]

@@ -279,7 +279,7 @@ fn build_warehouse_rules() -> Vec<Rule> {
 /// Build CREATE ... CLONE rules: CORE + clone-specific keywords.
 fn build_clone_rules() -> Vec<Rule> {
     let mut rules = core::core_rules();
-    let clone_keywords = vec![
+    let clone_keywords = [
         r"create(\s+or\s+replace)?\s+(database|schema|table|stage|file\s+format|sequence|stream|task)(\s+if\s+not\s+exists)?",
         "clone",
     ];

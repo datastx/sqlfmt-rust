@@ -95,8 +95,7 @@ impl QueryFormatter {
                 }
                 content_count += 1;
                 if content_count == 1 {
-                    first_content_is_on =
-                        node.token.token_type == crate::token::TokenType::On;
+                    first_content_is_on = node.token.token_type == crate::token::TokenType::On;
                 }
                 if node.is_multiline_jinja() {
                     multiline_count += 1;
@@ -141,15 +140,23 @@ impl QueryFormatter {
                     // Add a newline node for line1 (inherit open_brackets/open_jinja_blocks)
                     let spos = prev_idx.map(|i| arena[i].token.epos).unwrap_or(0);
                     let nl_token = crate::token::Token::new(
-                        crate::token::TokenType::Newline, "", "\n", spos, spos,
+                        crate::token::TokenType::Newline,
+                        "",
+                        "\n",
+                        spos,
+                        spos,
                     );
                     let nl_node = Node::new(
                         nl_token,
                         prev_idx,
                         String::new(),
                         "\n".to_string(),
-                        prev_idx.map(|i| arena[i].open_brackets.clone()).unwrap_or_default(),
-                        prev_idx.map(|i| arena[i].open_jinja_blocks.clone()).unwrap_or_default(),
+                        prev_idx
+                            .map(|i| arena[i].open_brackets.clone())
+                            .unwrap_or_default(),
+                        prev_idx
+                            .map(|i| arena[i].open_jinja_blocks.clone())
+                            .unwrap_or_default(),
                     );
                     let nl_idx = arena.len();
                     arena.push(nl_node);

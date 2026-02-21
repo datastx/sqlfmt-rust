@@ -29,8 +29,7 @@ fn bench_format_medium(c: &mut Criterion) {
 }
 
 fn bench_format_large(c: &mut Criterion) {
-    let sql =
-        load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
+    let sql = load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
     let mode = Mode::default();
     c.bench_function("format_large", |b| {
         b.iter(|| format_string(black_box(&sql), black_box(&mode)).unwrap())
@@ -38,8 +37,7 @@ fn bench_format_large(c: &mut Criterion) {
 }
 
 fn bench_lex_only(c: &mut Criterion) {
-    let sql =
-        load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
+    let sql = load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
     let mode = Mode::default();
     let dialect = mode.dialect().unwrap();
     c.bench_function("lex_only", |b| {
@@ -51,8 +49,7 @@ fn bench_lex_only(c: &mut Criterion) {
 }
 
 fn bench_format_no_safety(c: &mut Criterion) {
-    let sql =
-        load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
+    let sql = load_test_file("216_gitlab_zuora_revenue_revenue_contract_line_source.sql");
     let mode = Mode {
         fast: true,
         ..Mode::default()

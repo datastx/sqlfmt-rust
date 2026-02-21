@@ -346,10 +346,7 @@ fn normalize_jinja_structure(text: &str) -> String {
             let trimmed_len = result.trim_end().len();
             if trimmed_len > 0 {
                 let last_byte = result.as_bytes()[trimmed_len - 1];
-                if last_byte.is_ascii_alphanumeric()
-                    || last_byte == b'_'
-                    || last_byte == b'.'
-                {
+                if last_byte.is_ascii_alphanumeric() || last_byte == b'_' || last_byte == b'.' {
                     result.truncate(trimmed_len);
                 }
             }
@@ -435,14 +432,11 @@ fn normalize_jinja_operators(text: &str) -> String {
         let is_eq = bytes[i] == b'='
             && (i + 1 >= bytes.len() || bytes[i + 1] != b'=')
             && (i == 0 || bytes[i - 1] != b'!' && bytes[i - 1] != b'>' && bytes[i - 1] != b'<');
-        if bytes[i] == b'+' || bytes[i] == b'~' || is_eq
+        if bytes[i] == b'+'
+            || bytes[i] == b'~'
+            || is_eq
             || (bytes[i] == b'|' && (i + 1 >= bytes.len() || bytes[i + 1] != b'|'))
         {
-            // Remove trailing spaces before operator
-            while result.ends_with(' ') && !result.ends_with("  ") {
-                // Keep at most the space that was there
-                break;
-            }
             let trimmed = result.trim_end();
             let trimmed_len = trimmed.len();
             result.truncate(trimmed_len);

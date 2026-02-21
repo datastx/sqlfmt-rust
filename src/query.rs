@@ -50,8 +50,7 @@ impl Query {
             // For formatting-disabled lines, extract indentation from original
             // token prefix (since depth is always 0 for these lines)
             if next.has_formatting_disabled() {
-                if let Some(&first_idx) = next.nodes.iter().find(|&&idx| !arena[idx].is_newline())
-                {
+                if let Some(&first_idx) = next.nodes.iter().find(|&&idx| !arena[idx].is_newline()) {
                     let prefix = &arena[first_idx].token.prefix;
                     return Some(prefix.clone());
                 }

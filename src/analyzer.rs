@@ -351,10 +351,9 @@ impl Analyzer {
                 self.node_manager.push_jinja_block(last_idx);
                 // Determine if this block should switch to data rules
                 let lower = token_text.to_lowercase();
-                let stripped = lower
-                    .trim_start_matches(|c: char| {
-                        c == '{' || c == '%' || c == '-' || c.is_whitespace()
-                    });
+                let stripped = lower.trim_start_matches(|c: char| {
+                    c == '{' || c == '%' || c == '-' || c.is_whitespace()
+                });
                 if stripped.starts_with("call") && !stripped.starts_with("call statement") {
                     // {% call foo() %} blocks: treat content as data
                     self.push_rules(crate::rules::jinja_call_block_rules());
