@@ -96,12 +96,30 @@ fn main() {
         }
     };
 
+    // Environment variable overrides: CLI flags take precedence.
+    let env_fast = std::env::var("SQLFMT_FAST")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    let env_threads: usize = match std::env::var("SQLFMT_THREADS") {
+        Ok(v) => match v.parse::<usize>() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!(
+                    "Warning: SQLFMT_THREADS='{}' is not a valid non-negative integer; ignoring.",
+                    v
+                );
+                0
+            }
+        },
+        Err(_) => 0,
+    };
+
     let mode = Mode {
         line_length: cli.line_length,
         dialect_name: cli.dialect,
         check: cli.check,
         diff: cli.diff,
-        fast: cli.fast,
+        fast: cli.fast || env_fast,
         no_jinjafmt: cli.no_jinjafmt,
         exclude: if cli.exclude.is_empty() {
             base_mode.exclude
@@ -114,7 +132,11 @@ fn main() {
         no_progressbar: cli.no_progressbar,
         no_color: cli.no_color,
         force_color: cli.force_color,
-        threads: cli.threads,
+        threads: if cli.threads != 0 {
+            cli.threads
+        } else {
+            env_threads
+        },
         single_process: cli.single_process,
         reset_cache: cli.reset_cache,
     };

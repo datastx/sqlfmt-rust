@@ -113,6 +113,24 @@ Options:
   -V, --version               Print version
 ```
 
+### Environment variables
+
+You can set environment variables to enable performance options without passing flags on every invocation:
+
+| Variable | Equivalent flag | Description |
+|---|---|---|
+| `SQLFMT_FAST=1` | `--fast` | Skip the safety equivalence check for faster formatting |
+| `SQLFMT_THREADS=N` | `--threads N` | Number of parallel threads (`0` = all cores) |
+
+Accepted values for `SQLFMT_FAST`: `1`, `true`, `yes` (case-insensitive). CLI flags always take precedence over environment variables.
+
+```bash
+# Format a large directory as fast as possible
+export SQLFMT_FAST=1
+export SQLFMT_THREADS=8
+sqlfmt .
+```
+
 ### Configuration file
 
 sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pyproject.toml`:
