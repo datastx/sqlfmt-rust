@@ -66,10 +66,22 @@ pub async fn run(files: &[PathBuf], mode: &Mode) -> Report {
             report.add(result);
         }
     } else {
+        // Limit concurrency to the configured thread count (or num_cpus).
+        let concurrency = if mode.threads > 0 {
+            mode.threads
+        } else {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        };
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
         let mut handles = Vec::with_capacity(matching_paths.len());
         for path in matching_paths {
             let mode = mode.clone();
+            let sem = semaphore.clone();
             handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await.expect("semaphore closed");
                 format_file_async(&path, &mode).await
             }));
         }
