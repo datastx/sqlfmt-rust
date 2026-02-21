@@ -141,6 +141,18 @@ fn main() {
         reset_cache: cli.reset_cache,
     };
 
+    // Build the tokio runtime, optionally setting worker_threads.
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if mode.threads > 0 {
+        builder.worker_threads(mode.threads);
+    }
+    let runtime = builder.build().expect("failed to build tokio runtime");
+
+    runtime.block_on(async_main(cli.files, mode, is_stdin));
+}
+
+async fn async_main(files: Vec<PathBuf>, mode: Mode, is_stdin: bool) {
     if is_stdin {
         let mut source = String::new();
         if let Err(e) = io::stdin().read_to_string(&mut source) {
@@ -158,7 +170,7 @@ fn main() {
             }
         }
     } else {
-        let report = sqlfmt::run(&cli.files, &mode);
+        let report = sqlfmt::run(&files, &mode).await;
 
         if !mode.quiet {
             print_verbose_results(&report, &mode);
