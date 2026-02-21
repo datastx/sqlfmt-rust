@@ -77,10 +77,6 @@ impl LineSplitter {
     fn maybe_split_before(&self, node_idx: NodeIndex, arena: &[Node]) -> bool {
         let node = &arena[node_idx];
 
-        // Do NOT split before bracket operators (array indexing, etc.)
-        if node.is_bracket_operator(arena) {
-            return false;
-        }
         // Do NOT split before multiline jinja in Stage 1.
         // Multiline jinja nodes are created by the JinjaFormatter in Stage 2.
         // If they need splitting, Stage 2b (split_multiline_jinja) handles it
@@ -103,10 +99,7 @@ impl LineSplitter {
             if node.is_the_and_after_between(arena) {
                 return false;
             }
-            if matches!(
-                node.token.token_type,
-                TokenType::DoublColon | TokenType::Colon
-            ) {
+            if matches!(node.token.token_type, TokenType::Colon) {
                 return false;
             }
             return true;

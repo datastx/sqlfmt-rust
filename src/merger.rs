@@ -149,8 +149,74 @@ impl LineMerger {
                     }
                 }
 
+                // Convert leading commas to trailing commas: merge standalone
+                // commas with the preceding content line.
+                self.fix_standalone_commas(&mut merged_lines, arena);
+
                 merged_lines
             }
+        }
+    }
+
+    /// Convert leading commas to trailing commas by merging standalone comma
+    /// lines with the preceding non-blank content line.
+    /// Python sqlfmt always uses trailing comma style.
+    /// Don't merge commas with Jinja block tags ({% if %}, {% else %}, etc.)
+    /// as the comma is part of the block's content, not the tag itself.
+    fn fix_standalone_commas(&self, lines: &mut Vec<Line>, arena: &[Node]) {
+        let mut i = 0;
+        while i < lines.len() {
+            if lines[i].is_standalone_comma(arena) && i > 0 {
+                // Find the preceding non-blank, non-comment content line
+                let mut prev_idx = None;
+                for j in (0..i).rev() {
+                    if !lines[j].is_blank_line(arena)
+                        && !lines[j].is_standalone_comment_line(arena)
+                    {
+                        prev_idx = Some(j);
+                        break;
+                    }
+                }
+                if let Some(pi) = prev_idx {
+                    // Don't merge comma with Jinja block tags
+                    let prev_is_jinja_block = lines[pi]
+                        .first_content_node(arena)
+                        .map(|n| {
+                            matches!(
+                                n.token.token_type,
+                                crate::token::TokenType::JinjaBlockStart
+                                    | crate::token::TokenType::JinjaBlockKeyword
+                                    | crate::token::TokenType::JinjaBlockEnd
+                            )
+                        })
+                        .unwrap_or(false);
+                    if prev_is_jinja_block {
+                        i += 1;
+                        continue;
+                    }
+                    // Try to merge comma with preceding line
+                    let to_merge = vec![lines[pi].clone(), lines[i].clone()];
+                    if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
+                        if let Some(merged_line) =
+                            merged.into_iter().find(|l| !l.is_blank_line(arena))
+                        {
+                            lines[pi] = merged_line;
+                            // Remove the comma line
+                            lines.remove(i);
+                            // Also remove blank lines between pi and the
+                            // next content (comments/non-blank) that were
+                            // separating the comma from the content.
+                            while pi + 1 < lines.len()
+                                && lines[pi + 1].is_blank_line(arena)
+                            {
+                                lines.remove(pi + 1);
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+            i += 1;
         }
     }
 
@@ -212,19 +278,25 @@ impl LineMerger {
         lines: &[Line],
         arena: &[Node],
     ) -> Result<(Vec<usize>, Vec<crate::comment::Comment>), ControlFlow> {
-        // Lines with inline comments cannot be merged with subsequent lines
-        // because inline comments must stay at the end of their line.
-        // Only the last non-blank line can have inline comments
-        // (they'll appear at end of merged line).
-        let last_content_idx = lines
-            .iter()
-            .rposition(|l| !l.is_blank_line(arena));
-        for (i, line) in lines.iter().enumerate() {
-            if Some(i) != last_content_idx
-                && !line.is_blank_line(arena)
-                && line.comments.iter().any(|c| c.is_inline())
-            {
-                return Err(ControlFlow::CannotMerge);
+        // Lines with inline comments can only be merged if the following
+        // line is a standalone comma or blank line. This allows the trailing
+        // comma pattern: "2,  -- two inline" (inline comment line + comma).
+        // Python sqlfmt tracks `has_inline_comment_above` and only allows
+        // standalone commas or blank lines after it.
+        let mut has_inline_comment_above = false;
+        for (_i, line) in lines.iter().enumerate() {
+            if !line.comments.is_empty() {
+                if has_inline_comment_above {
+                    return Err(ControlFlow::CannotMerge);
+                }
+                let has_inline = line.comments.iter().any(|c| c.is_inline());
+                if has_inline && !line.is_blank_line(arena) {
+                    has_inline_comment_above = true;
+                }
+            } else if has_inline_comment_above {
+                if !line.is_standalone_comma(arena) && !line.is_blank_line(arena) {
+                    return Err(ControlFlow::CannotMerge);
+                }
             }
         }
 

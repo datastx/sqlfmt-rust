@@ -556,11 +556,48 @@ pub fn jinja_set_block_rules() -> Vec<Rule> {
             r"(\{%-?\s*endset\s*-?%\})",
             Action::HandleJinjaBlockEnd,
         ),
-        // Data: everything else up to newline (preserves original text verbatim)
+        // Data: everything else up to newline (preserves original text verbatim).
+        // Use \S[^\n]* to require at least one non-whitespace character.
+        // This prevents trailing whitespace (e.g., after `{% set bar %} `)
+        // from being matched as a Data token, which would incorrectly mark
+        // the line as formatting-disabled.
         Rule::new(
             "data",
             5000,
-            r"([^\n]+)",
+            r"(\S[^\n]*)",
+            Action::AddNode {
+                token_type: TokenType::Data,
+            },
+        ),
+        // Newline
+        Rule::new("newline", 9000, r"(\n)", Action::HandleNewline),
+    ]
+}
+
+/// Build the Jinja call block rules — applied inside `{% call foo() %}...{% endcall %}`.
+/// Treats content as Data (preserving CSV or other non-SQL content verbatim).
+/// Handles nested `{% call %}` blocks by pushing another layer of these rules.
+pub fn jinja_call_block_rules() -> Vec<Rule> {
+    vec![
+        // {% endcall %} (exits call block mode)
+        Rule::new(
+            "jinja_endcall",
+            116,
+            r"(\{%-?\s*endcall\s*-?%\})",
+            Action::HandleJinjaBlockEnd,
+        ),
+        // Nested {% call ... %} blocks
+        Rule::new(
+            "jinja_call_start",
+            119,
+            r"(\{%-?\s*call(?:\(.*?\))?\s+\w+[\s\S]*?-?%\})",
+            Action::HandleJinjaBlockStart,
+        ),
+        // Data: everything else up to newline (preserves original text verbatim).
+        Rule::new(
+            "data",
+            5000,
+            r"(\S[^\n]*)",
             Action::AddNode {
                 token_type: TokenType::Data,
             },

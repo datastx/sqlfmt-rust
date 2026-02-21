@@ -349,10 +349,17 @@ impl Analyzer {
                 self.add_node(prefix, token_text, TokenType::JinjaBlockStart);
                 let last_idx = self.arena.len() - 1;
                 self.node_manager.push_jinja_block(last_idx);
-                // For {% set x %} blocks (without =), switch to set block rules
-                // to preserve content as data until {% endset %}
+                // Determine if this block should switch to data rules
                 let lower = token_text.to_lowercase();
-                if lower.contains("set") && !lower.contains('=') {
+                let stripped = lower
+                    .trim_start_matches(|c: char| {
+                        c == '{' || c == '%' || c == '-' || c.is_whitespace()
+                    });
+                if stripped.starts_with("call") && !stripped.starts_with("call statement") {
+                    // {% call foo() %} blocks: treat content as data
+                    self.push_rules(crate::rules::jinja_call_block_rules());
+                } else if stripped.starts_with("set") && !lower.contains('=') {
+                    // {% set x %} blocks (without =): treat content as data
                     self.push_rules(crate::rules::jinja_set_block_rules());
                 }
                 self.pos += match_len;
@@ -384,9 +391,11 @@ impl Analyzer {
             }
 
             Action::HandleJinjaBlockEnd => {
-                // Pop set block rules if we were inside a set block
+                // Pop data block rules if we were inside a set or call block
                 let lower = token_text.to_lowercase();
-                if lower.contains("endset") && self.rule_stack.len() > 1 {
+                if (lower.contains("endset") || lower.contains("endcall"))
+                    && self.rule_stack.len() > 1
+                {
                     self.pop_rules();
                 }
                 self.node_manager.pop_jinja_block();

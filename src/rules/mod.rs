@@ -21,6 +21,9 @@ static FMT_OFF_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::fmt_off_rules);
 /// Cached compiled jinja set block rules.
 static JINJA_SET_BLOCK_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::jinja_set_block_rules);
 
+/// Cached compiled jinja call block rules.
+static JINJA_CALL_BLOCK_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::jinja_call_block_rules);
+
 /// Cached compiled unsupported DDL rules.
 static UNSUPPORTED_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_unsupported_rules);
 
@@ -49,6 +52,11 @@ pub fn fmt_off_rules() -> Vec<Rule> {
 /// Get the Jinja set block rule set, cloned from a cached compiled version.
 pub fn jinja_set_block_rules() -> Vec<Rule> {
     JINJA_SET_BLOCK_RULES.clone()
+}
+
+/// Get the Jinja call block rule set, cloned from a cached compiled version.
+pub fn jinja_call_block_rules() -> Vec<Rule> {
+    JINJA_CALL_BLOCK_RULES.clone()
 }
 
 /// Get the UNSUPPORTED DDL rule set.
@@ -751,6 +759,19 @@ fn build_main_rules() -> Vec<Rule> {
                     ruleset_name: "warehouse".to_string(),
                 }),
             }),
+        },
+    ));
+
+    // DDL keywords that can also be function names: when followed by `(`,
+    // treat as Name (function call) rather than DDL. Python uses (?!\() negative
+    // lookahead; Rust regex doesn't support lookaheads, so we use a higher-priority
+    // rule with HandleKeywordBeforeParen instead.
+    rules.push(Rule::new(
+        "ddl_functions_before_paren",
+        2998,
+        r"((?:get|comment|add|remove|list)\s*\()",
+        Action::HandleKeywordBeforeParen {
+            token_type: TokenType::Name,
         },
     ));
 
