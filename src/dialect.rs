@@ -1,4 +1,5 @@
 use crate::analyzer::Analyzer;
+use crate::error::SqlfmtError;
 use crate::node_manager::NodeManager;
 use crate::rule::Rule;
 use crate::rules;
@@ -53,12 +54,12 @@ impl Dialect for DuckDb {
 }
 
 /// Create a dialect from a string name.
-pub fn dialect_from_name(name: &str) -> Result<Box<dyn Dialect>, String> {
+pub fn dialect_from_name(name: &str) -> Result<Box<dyn Dialect>, SqlfmtError> {
     match name.to_ascii_lowercase().as_str() {
         "polyglot" => Ok(Box::new(Polyglot)),
         "clickhouse" => Ok(Box::new(ClickHouse)),
         "duckdb" => Ok(Box::new(DuckDb)),
-        _ => Err(format!("Unknown dialect: {}", name)),
+        _ => Err(SqlfmtError::Config(format!("Unknown dialect: {}", name))),
     }
 }
 

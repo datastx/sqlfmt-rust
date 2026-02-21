@@ -41,7 +41,7 @@ impl NodeManager {
         let formatting_disabled = self.compute_formatting_disabled(&token, previous_node, arena);
 
         let (prefix, value) = if !formatting_disabled.is_empty() {
-            (token.prefix.clone(), token.token.clone())
+            (token.prefix.clone(), token.text.clone())
         } else {
             let prefix = self
                 .compute_prefix(&token, previous_node, arena)
@@ -101,7 +101,7 @@ impl NodeManager {
             TokenType::UntermKeyword | TokenType::SetOperator => {
                 // LATERAL should NOT pop the previous keyword — it's a modifier
                 // within the FROM clause, not a replacement for FROM.
-                let is_lateral = token.token.eq_ignore_ascii_case("lateral");
+                let is_lateral = token.text.eq_ignore_ascii_case("lateral");
                 if !is_lateral {
                     if let Some(last) = node_brackets.last() {
                         if arena[*last].is_unterm_keyword() {
@@ -202,19 +202,6 @@ impl NodeManager {
         self.open_jinja_blocks.pop();
     }
 
-    /// Recompute the prefix for a node using a different previous_node reference.
-    /// Used for jinja block keywords and block ends where the previous_node
-    /// is overridden to the block start's previous_node (matching Python behavior).
-    pub fn recompute_prefix(
-        &self,
-        token: &Token,
-        previous_node: Option<NodeIndex>,
-        arena: &[Node],
-    ) -> String {
-        self.compute_prefix(token, previous_node, arena)
-            .into_owned()
-    }
-
     /// Compute the whitespace prefix for a token.
     /// Mirrors Python's NodeManager.whitespace() exactly.
     fn compute_prefix(
@@ -289,7 +276,7 @@ impl NodeManager {
         if tt == TokenType::Name && prev_type == Some(TokenType::Star) {
             if let Some(prev_node) = prev {
                 if !prev_node.is_multiplication_star(arena)
-                    && token.token.eq_ignore_ascii_case("columns")
+                    && token.text.eq_ignore_ascii_case("columns")
                 {
                     return Cow::Borrowed("");
                 }
@@ -314,7 +301,7 @@ impl NodeManager {
                             | b'X'
                             | b'E'
                     )
-                    && token.token.starts_with('\'')
+                    && token.text.starts_with('\'')
                 {
                     return Cow::Borrowed("");
                 }
@@ -325,10 +312,13 @@ impl NodeManager {
             return Cow::Borrowed(" ");
         }
 
-        if tt == TokenType::BracketOpen && token.token.contains('<') {
+        if tt == TokenType::BracketOpen && token.text.contains('<') {
             if let Some(prev_node) = prev {
-                let lv = prev_node.value.to_ascii_lowercase();
-                if lv == "array" || lv == "struct" || lv == "map" || lv == "table" {
+                if prev_node.value.eq_ignore_ascii_case("array")
+                    || prev_node.value.eq_ignore_ascii_case("struct")
+                    || prev_node.value.eq_ignore_ascii_case("map")
+                    || prev_node.value.eq_ignore_ascii_case("table")
+                {
                     return Cow::Borrowed("");
                 }
             }
@@ -360,12 +350,15 @@ impl NodeManager {
         {
             if prev_type == Some(TokenType::Name) {
                 if let Some(prev_node) = prev {
-                    let lv = prev_node.value.to_ascii_lowercase();
                     // Snowflake DDL: before(, at( always need a space
-                    if lv == "before" || lv == "at" {
+                    if prev_node.value.eq_ignore_ascii_case("before")
+                        || prev_node.value.eq_ignore_ascii_case("at")
+                    {
                         return Cow::Borrowed(" ");
                     }
-                    if lv == "filter" || lv == "offset" {
+                    if prev_node.value.eq_ignore_ascii_case("filter")
+                        || prev_node.value.eq_ignore_ascii_case("offset")
+                    {
                         let (pp, _) = Self::get_previous_token(prev_node.previous_node, arena);
                         if let Some(pp_node) = pp {
                             if matches!(
@@ -381,7 +374,7 @@ impl NodeManager {
             return Cow::Borrowed("");
         }
 
-        if tt == TokenType::BracketOpen && token.token == "[" && prev_type == Some(TokenType::Colon)
+        if tt == TokenType::BracketOpen && token.text == "[" && prev_type == Some(TokenType::Colon)
         {
             return Cow::Borrowed("");
         }
@@ -444,54 +437,62 @@ impl NodeManager {
 
         if tt.is_always_lowercased() {
             // Fast path: if already lowercase and single-word, borrow directly
-            if !token.token.contains(|c: char| c.is_ascii_whitespace())
-                && token.token.bytes().all(|b| !b.is_ascii_uppercase())
+            if !token.text.contains(|c: char| c.is_ascii_whitespace())
+                && token.text.bytes().all(|b| !b.is_ascii_uppercase())
             {
-                return Cow::Borrowed(&token.token);
+                return Cow::Borrowed(&token.text);
             }
-            return Cow::Owned(
-                token
-                    .token
-                    .to_ascii_lowercase()
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            );
+            // Use optimized bulk lowercase, then normalize whitespace without Vec
+            let lower = token.text.to_ascii_lowercase();
+            if !lower.contains(|c: char| c.is_ascii_whitespace()) {
+                return Cow::Owned(lower);
+            }
+            let mut result = String::with_capacity(lower.len());
+            for (i, word) in lower.split_whitespace().enumerate() {
+                if i > 0 {
+                    result.push(' ');
+                }
+                result.push_str(word);
+            }
+            return Cow::Owned(result);
         }
 
         if tt == TokenType::Number {
-            if token.token.bytes().all(|b| !b.is_ascii_uppercase()) {
-                return Cow::Borrowed(&token.token);
+            if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
+                return Cow::Borrowed(&token.text);
             }
-            return Cow::Owned(token.token.to_ascii_lowercase());
+            return Cow::Owned(token.text.to_ascii_lowercase());
         }
 
         if !self.case_sensitive_names && tt == TokenType::Name {
-            let first = token.token.as_bytes().first().copied();
+            let first = token.text.as_bytes().first().copied();
             if matches!(first, Some(b'\'') | Some(b'$')) {
-                return Cow::Borrowed(&token.token);
+                return Cow::Borrowed(&token.text);
             }
-            if token.token.bytes().all(|b| !b.is_ascii_uppercase()) {
-                return Cow::Borrowed(&token.token);
+            if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
+                return Cow::Borrowed(&token.text);
             }
-            return Cow::Owned(token.token.to_ascii_lowercase());
+            return Cow::Owned(token.text.to_ascii_lowercase());
         }
 
         // Jinja tokens, quoted names, etc.: preserve original text
-        Cow::Borrowed(&token.token)
+        Cow::Borrowed(&token.text)
     }
 
     /// Enable formatting (handle fmt:on).
+    #[cfg(test)]
     pub fn enable_formatting(&mut self) {
         self.formatting_disabled.clear();
     }
 
     /// Disable formatting (handle fmt:off).
+    #[cfg(test)]
     pub fn disable_formatting(&mut self) {
         self.formatting_disabled.push(0);
     }
 
     /// Check if formatting is currently disabled.
+    #[cfg(test)]
     pub fn is_formatting_disabled(&self) -> bool {
         !self.formatting_disabled.is_empty()
     }

@@ -14,12 +14,12 @@ impl Segment {
         Self { lines }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.lines.len()
     }
@@ -97,7 +97,7 @@ impl Segment {
     }
 
     /// Split the segment after the given line index.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn split_after(&self, idx: usize, arena: &[Node]) -> Vec<Segment> {
         if self.tail_closes_head(arena) {
             let (tail_from_bottom, _) = match self.tail(arena) {

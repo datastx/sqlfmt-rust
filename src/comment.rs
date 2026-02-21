@@ -22,15 +22,15 @@ impl Comment {
     }
 
     pub fn is_multiline(&self) -> bool {
-        self.token.token.contains('\n')
+        self.token.text.contains('\n')
     }
 
     pub fn is_c_style(&self) -> bool {
-        self.token.token.starts_with("/*")
+        self.token.text.starts_with("/*")
     }
 
     pub fn is_jinja_comment(&self) -> bool {
-        self.token.token.starts_with("{#")
+        self.token.text.starts_with("{#")
     }
 
     pub fn is_inline(&self) -> bool {
@@ -39,7 +39,7 @@ impl Comment {
 
     /// Return the comment marker (e.g., "--", "/*", "{#-").
     pub fn marker(&self) -> &str {
-        let text = &self.token.token;
+        let text = &self.token.text;
         for marker in COMMENT_MARKERS {
             if text.starts_with(marker) {
                 if *marker == "{#" && text.len() > 2 && text.as_bytes()[2] == b'-' {
@@ -65,7 +65,7 @@ impl Comment {
     /// Return the comment body (text after the marker, leading whitespace trimmed).
     /// Trailing whitespace is preserved to match Python sqlfmt behavior.
     pub fn body(&self) -> &str {
-        let text = &self.token.token;
+        let text = &self.token.text;
         let marker = self.marker();
         let after_marker = &text[marker.len()..];
         after_marker.trim_start()
@@ -75,7 +75,7 @@ impl Comment {
     pub fn render_inline(&self) -> String {
         if self.is_c_style() {
             // Preserve C-style comments exactly (especially hints like /*+ ... */)
-            format!("  {}", self.token.token.trim())
+            format!("  {}", self.token.text.trim())
         } else {
             format!("  {} {}", self.output_marker(), self.body())
         }
@@ -84,7 +84,7 @@ impl Comment {
     /// Render as standalone comment on its own line(s).
     pub fn render_standalone(&self, prefix: &str, max_line_length: usize) -> String {
         if self.is_multiline() || self.is_c_style() || self.is_jinja_comment() {
-            return format!("{}{}\n", prefix, self.token.token.trim());
+            return format!("{}{}\n", prefix, self.token.text.trim());
         }
 
         let marker = self.output_marker();

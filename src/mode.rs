@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use crate::dialect::{self, Dialect};
+use crate::error::SqlfmtError;
 
 /// Mode holds all formatting configuration for sqlfmt.
 #[derive(Debug, Clone, Deserialize)]
@@ -70,11 +71,12 @@ fn default_encoding() -> String {
 
 impl Mode {
     /// Create the dialect for the configured dialect_name.
-    pub fn dialect(&self) -> Result<Box<dyn Dialect>, String> {
+    pub fn dialect(&self) -> Result<Box<dyn Dialect>, SqlfmtError> {
         dialect::dialect_from_name(&self.dialect_name)
     }
 
     /// Whether color output is enabled.
+    #[cfg(test)]
     pub fn color(&self) -> bool {
         if self.force_color {
             return true;

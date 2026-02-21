@@ -6,6 +6,7 @@ use crate::node::{Node, NodeIndex};
 use crate::node_manager::NodeManager;
 use crate::query::Query;
 use crate::rule::Rule;
+use crate::string_utils::skip_string_literal;
 use crate::token::{Token, TokenType};
 
 /// The regex-based lexer. Parses SQL source strings into Queries.
@@ -259,38 +260,12 @@ impl Analyzer {
             }
 
             Action::HandleJinjaBlockKeyword => {
-                // Save the block start's previous_node before popping.
-                // Python sqlfmt sets {% else %}'s previous_node to {% if %}'s
-                // previous_node so get_previous_token resolves to the SQL
-                // context before the entire if/else block.
-                let block_start_prev = self
-                    .node_manager
-                    .open_jinja_blocks
-                    .last()
-                    .and_then(|&idx| self.arena[idx].previous_node);
-                self.node_manager.pop_jinja_block();
-                self.add_node(prefix, token_text, TokenType::JinjaBlockKeyword);
-                let last_idx = self.arena.len() - 1;
-                // Override previous_node to block start's previous_node
-                // so get_previous_token for tokens AFTER {% else %} resolves
-                // to the SQL context before the entire if/else block.
-                // The prefix is always "" for block keywords (handled in compute_prefix).
-                if let Some(bsp) = block_start_prev {
-                    self.arena[last_idx].previous_node = Some(bsp);
-                }
-                self.node_manager.push_jinja_block(last_idx);
+                self.handle_jinja_block_keyword(prefix, token_text);
                 self.pos += match_len;
             }
 
             Action::HandleJinjaBlockEnd => {
-                let lower = token_text.to_lowercase();
-                if (lower.contains("endset") || lower.contains("endcall"))
-                    && self.rule_stack.len() > 1
-                {
-                    self.pop_rules();
-                }
-                self.node_manager.pop_jinja_block();
-                self.add_node(prefix, token_text, TokenType::JinjaBlockEnd);
+                self.handle_jinja_block_end(prefix, token_text);
                 self.pos += match_len;
             }
 
@@ -433,14 +408,55 @@ impl Analyzer {
         }
     }
 
+    /// Handle {% else %}, {% elif %}, etc. — close the previous block section
+    /// and open a new one, inheriting the SQL context from the block start.
+    fn handle_jinja_block_keyword(&mut self, prefix: &str, token_text: &str) {
+        // Save the block start's previous_node before popping.
+        // Python sqlfmt sets {% else %}'s previous_node to {% if %}'s
+        // previous_node so get_previous_token resolves to the SQL
+        // context before the entire if/else block.
+        let block_start_prev = self
+            .node_manager
+            .open_jinja_blocks
+            .last()
+            .and_then(|&idx| self.arena[idx].previous_node);
+        self.node_manager.pop_jinja_block();
+        self.add_node(prefix, token_text, TokenType::JinjaBlockKeyword);
+        let last_idx = self.arena.len() - 1;
+        if let Some(bsp) = block_start_prev {
+            self.arena[last_idx].previous_node = Some(bsp);
+        }
+        self.node_manager.push_jinja_block(last_idx);
+    }
+
+    /// Handle {% endif %}, {% endfor %}, etc. — close the jinja block,
+    /// popping data-mode rules if this is an endset/endcall.
+    fn handle_jinja_block_end(&mut self, prefix: &str, token_text: &str) {
+        if self.rule_stack.len() > 1 {
+            let lower = token_text.to_lowercase();
+            if lower.contains("endset") || lower.contains("endcall") {
+                self.pop_rules();
+            }
+        }
+        self.node_manager.pop_jinja_block();
+        self.add_node(prefix, token_text, TokenType::JinjaBlockEnd);
+    }
+
     /// Push data-mode rules for {% call %} and {% set %} blocks.
     fn maybe_push_jinja_data_rules(&mut self, token_text: &str) {
-        let lower = token_text.to_lowercase();
-        let stripped = lower
+        // Strip Jinja delimiters and whitespace without allocating a lowercased copy.
+        let stripped = token_text
             .trim_start_matches(|c: char| c == '{' || c == '%' || c == '-' || c.is_whitespace());
-        if stripped.starts_with("call") && !stripped.starts_with("call statement") {
+        let starts_with_ci = |s: &str, prefix: &str| -> bool {
+            s.len() >= prefix.len()
+                && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+        };
+        let starts_with_ci_not = |s: &str, prefix: &str, not_prefix: &str| -> bool {
+            starts_with_ci(s, prefix) && !starts_with_ci(s, not_prefix)
+        };
+        if starts_with_ci_not(stripped, "call", "call statement") {
             self.push_rules(crate::rules::jinja_call_block_rules());
-        } else if stripped.starts_with("set") && !lower.contains('=') {
+        } else if starts_with_ci(stripped, "set") && !token_text.contains('=') {
             self.push_rules(crate::rules::jinja_set_block_rules());
         }
     }
@@ -535,7 +551,7 @@ impl Analyzer {
         is_standalone: bool,
         prev: Option<NodeIndex>,
     ) -> bool {
-        if !is_standalone || self.line_buffer.is_empty() || token.token.is_empty() {
+        if !is_standalone || self.line_buffer.is_empty() || token.text.is_empty() {
             return false;
         }
         let same_line =
@@ -773,26 +789,8 @@ impl Analyzer {
                 continue;
             }
 
-            if bytes[i] == b'\'' {
-                i += 1;
-                while i < len && bytes[i] != b'\'' {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-                i += 1;
-                continue;
-            }
-            if bytes[i] == b'"' {
-                i += 1;
-                while i < len && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-                i += 1;
+            if bytes[i] == b'\'' || bytes[i] == b'"' {
+                i = skip_string_literal(bytes, i);
                 continue;
             }
             if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
@@ -805,39 +803,7 @@ impl Analyzer {
                 && bytes[i] == b'{'
                 && (bytes[i + 1] == b'{' || bytes[i + 1] == b'%' || bytes[i + 1] == b'#')
             {
-                let open = bytes[i + 1];
-                let close = match open {
-                    b'{' => b'}',
-                    b'%' => b'%',
-                    _ => b'#',
-                };
-                let mut depth = 1;
-                i += 2;
-                while i + 1 < len && depth > 0 {
-                    if bytes[i] == b'\'' || bytes[i] == b'"' {
-                        let quote = bytes[i];
-                        i += 1;
-                        while i < len && bytes[i] != quote {
-                            if bytes[i] == b'\\' {
-                                i += 1;
-                            }
-                            i += 1;
-                        }
-                        if i < len {
-                            i += 1;
-                        }
-                        continue;
-                    }
-                    if bytes[i] == b'{' && bytes[i + 1] == open {
-                        depth += 1;
-                        i += 2;
-                    } else if bytes[i] == close && bytes[i + 1] == b'}' {
-                        depth -= 1;
-                        i += 2;
-                    } else {
-                        i += 1;
-                    }
-                }
+                i = skip_jinja_block(bytes, i);
                 continue;
             }
             if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
@@ -873,7 +839,7 @@ impl Analyzer {
                     if depth < 0 {
                         return Err(SqlfmtError::Bracket(format!(
                             "Encountered closing bracket '{}' without a matching opening bracket",
-                            node.token.token
+                            node.token.text
                         )));
                     }
                 }
@@ -883,15 +849,45 @@ impl Analyzer {
         Ok(())
     }
 
-    pub fn push_rules(&mut self, rules: Vec<Rule>) {
+    fn push_rules(&mut self, rules: Vec<Rule>) {
         self.rule_stack.push(rules);
     }
 
-    pub fn pop_rules(&mut self) {
+    fn pop_rules(&mut self) {
         if self.rule_stack.len() > 1 {
             self.rule_stack.pop();
         }
     }
+}
+
+/// Skip a Jinja block ({{ }}, {% %}, or {# #}) starting at position `i`.
+/// Handles nested blocks and string literals. Returns position after the block.
+fn skip_jinja_block(bytes: &[u8], i: usize) -> usize {
+    let open = bytes[i + 1];
+    let close = match open {
+        b'{' => b'}',
+        b'%' => b'%',
+        _ => b'#',
+    };
+    let len = bytes.len();
+    let mut depth = 1;
+    let mut j = i + 2;
+    while j + 1 < len && depth > 0 {
+        if bytes[j] == b'\'' || bytes[j] == b'"' {
+            j = skip_string_literal(bytes, j);
+            continue;
+        }
+        if bytes[j] == b'{' && bytes[j + 1] == open {
+            depth += 1;
+            j += 2;
+        } else if bytes[j] == close && bytes[j + 1] == b'}' {
+            depth -= 1;
+            j += 2;
+        } else {
+            j += 1;
+        }
+    }
+    j
 }
 
 #[cfg(test)]

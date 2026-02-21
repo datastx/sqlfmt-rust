@@ -199,7 +199,7 @@ impl Node {
                 } else {
                     self.value == "("
                         && t.token_type == TokenType::BracketClose
-                        && t.token.contains('>')
+                        && t.text.contains('>')
                 }
             }
         }
@@ -321,7 +321,7 @@ mod tests {
         let node = make_node(TokenType::Name, "b", Some(1));
         let prev = node.get_previous_sql_token(&arena);
         assert!(prev.is_some());
-        assert_eq!(prev.unwrap().token, "a");
+        assert_eq!(prev.unwrap().text, "a");
     }
 
     #[test]

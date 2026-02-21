@@ -146,17 +146,17 @@ impl TokenType {
 pub struct Token {
     pub token_type: TokenType,
     pub prefix: String,
-    pub token: String,
+    pub text: String,
     pub spos: Pos,
     pub epos: Pos,
 }
 
 impl Token {
-    pub fn new(token_type: TokenType, prefix: &str, token: &str, spos: Pos, epos: Pos) -> Self {
+    pub fn new(token_type: TokenType, prefix: &str, text: &str, spos: Pos, epos: Pos) -> Self {
         Self {
             token_type,
             prefix: prefix.to_string(),
-            token: token.to_string(),
+            text: text.to_string(),
             spos,
             epos,
         }
@@ -208,7 +208,7 @@ mod tests {
         let tok = Token::new(TokenType::Name, " ", "foo", 5, 8);
         assert_eq!(tok.token_type, TokenType::Name);
         assert_eq!(tok.prefix, " ");
-        assert_eq!(tok.token, "foo");
+        assert_eq!(tok.text, "foo");
         assert_eq!(tok.spos, 5);
         assert_eq!(tok.epos, 8);
     }
