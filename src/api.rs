@@ -5,11 +5,12 @@ use crate::error::SqlfmtError;
 use crate::formatter::QueryFormatter;
 use crate::mode::Mode;
 use crate::report::{FileResult, Report};
+use crate::string_utils::skip_string_literal_into;
 
 /// Format a SQL string according to the given mode.
 /// This is the core API function.
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
-    let dialect = mode.dialect().map_err(SqlfmtError::Config)?;
+    let dialect = mode.dialect()?;
 
     let mut analyzer = dialect.initialize_analyzer(mode.line_length);
     let mut query = analyzer.parse_query(source)?;
@@ -200,7 +201,7 @@ fn collect_sql_files(
 fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), SqlfmtError> {
     use crate::token::TokenType;
 
-    let dialect = mode.dialect().map_err(SqlfmtError::Config)?;
+    let dialect = mode.dialect()?;
     let mut analyzer1 = dialect.initialize_analyzer(mode.line_length);
     let mut analyzer2 = dialect.initialize_analyzer(mode.line_length);
 
@@ -232,18 +233,30 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
         if n1.token.token_type != n2.token.token_type {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token type mismatch at position {}: original {:?} '{}', formatted {:?} '{}'",
-                i, n1.token.token_type, n1.token.token, n2.token.token_type, n2.token.token
+                i, n1.token.token_type, n1.token.text, n2.token.token_type, n2.token.text
             )));
         }
-        let t1 = n1.token.token.to_lowercase();
-        let t2 = n2.token.token.to_lowercase();
-        // Normalize whitespace for multi-word tokens and Jinja delimiters
+        // Fast path: if token text is identical, skip normalization entirely
+        if n1.token.text == n2.token.text {
+            continue;
+        }
+        // Fast path: if case-insensitively equal and single-word non-Jinja, skip
+        if !n1.token.token_type.is_jinja()
+            && !n1.token.text.contains(char::is_whitespace)
+            && !n2.token.text.contains(char::is_whitespace)
+            && n1.token.text.eq_ignore_ascii_case(&n2.token.text)
+        {
+            continue;
+        }
+        // Slow path: full normalization needed
+        let t1 = n1.token.text.to_lowercase();
+        let t2 = n2.token.text.to_lowercase();
         let t1_norm = normalize_token_text(&t1, n1.token.token_type);
         let t2_norm = normalize_token_text(&t2, n2.token.token_type);
         if t1_norm != t2_norm {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token text mismatch at position {}: original '{}', formatted '{}'",
-                i, n1.token.token, n2.token.token
+                i, n1.token.text, n2.token.text
             )));
         }
     }
@@ -255,22 +268,30 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
 /// For Jinja tokens, strip delimiters and normalize all internal whitespace
 /// so that `{{foo}}`, `{{ foo }}`, and multi-line Jinja tokens compare
 /// as equivalent when their content is semantically the same.
+/// Join whitespace-separated words with single spaces, without intermediate Vec.
+fn join_whitespace(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for (i, word) in text.split_whitespace().enumerate() {
+        if i > 0 {
+            result.push(' ');
+        }
+        result.push_str(word);
+    }
+    result
+}
+
 fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> String {
     use crate::token::TokenType;
     match token_type {
         TokenType::JinjaExpression => {
-            // Strip {{ / }} (and optional - for whitespace control)
             let inner = text
                 .trim_start_matches("{{-")
                 .trim_start_matches("{{")
                 .trim_end_matches("-}}")
                 .trim_end_matches("}}");
-            // Normalize all internal whitespace (including newlines) and quotes
-            let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
+            let normalized = join_whitespace(inner);
             let normalized = normalized.replace('\'', "\"");
-            // Normalize operator spacing (+ | ~) so a+b and a + b compare equal
             let normalized = normalize_jinja_operators(&normalized);
-            // Normalize structural chars so multiline formatting compares equal
             let normalized = normalize_jinja_structure(&normalized);
             format!("{{{{ {} }}}}", normalized)
         }
@@ -278,25 +299,18 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
         | TokenType::JinjaBlockStart
         | TokenType::JinjaBlockEnd
         | TokenType::JinjaBlockKeyword => {
-            // Strip {% / %} (and optional -)
             let inner = text
                 .trim_start_matches("{%-")
                 .trim_start_matches("{%")
                 .trim_end_matches("-%}")
                 .trim_end_matches("%}");
-            // Normalize all internal whitespace (including newlines) and quotes
-            let normalized: String = inner.split_whitespace().collect::<Vec<_>>().join(" ");
+            let normalized = join_whitespace(inner);
             let normalized = normalized.replace('\'', "\"");
-            // Normalize operator spacing (+ | ~) so a|b and a | b compare equal
             let normalized = normalize_jinja_operators(&normalized);
-            // Normalize structural chars so multiline formatting compares equal
             let normalized = normalize_jinja_structure(&normalized);
             format!("{{% {} %}}", normalized)
         }
-        _ => {
-            // General whitespace normalization for multi-word tokens
-            text.split_whitespace().collect::<Vec<_>>().join(" ")
-        }
+        _ => join_whitespace(text),
     }
 }
 
@@ -312,23 +326,7 @@ fn normalize_jinja_structure(text: &str) -> String {
     while i < bytes.len() {
         // Skip strings
         if bytes[i] == b'"' || bytes[i] == b'\'' {
-            let quote = bytes[i];
-            result.push(quote as char);
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    result.push(bytes[i] as char);
-                    result.push(bytes[i + 1] as char);
-                    i += 2;
-                    continue;
-                }
-                result.push(bytes[i] as char);
-                i += 1;
-            }
-            if i < bytes.len() {
-                result.push(bytes[i] as char);
-                i += 1;
-            }
+            i = skip_string_literal_into(bytes, i, &mut result);
             continue;
         }
 
@@ -400,23 +398,8 @@ fn normalize_jinja_operators(text: &str) -> String {
 
     while i < bytes.len() {
         // Skip strings
-        if bytes[i] == b'"' {
-            result.push('"');
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'"' {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    result.push(bytes[i] as char);
-                    result.push(bytes[i + 1] as char);
-                    i += 2;
-                    continue;
-                }
-                result.push(bytes[i] as char);
-                i += 1;
-            }
-            if i < bytes.len() {
-                result.push('"');
-                i += 1;
-            }
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            i = skip_string_literal_into(bytes, i, &mut result);
             continue;
         }
 

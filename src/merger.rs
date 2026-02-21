@@ -152,45 +152,31 @@ impl LineMerger {
     fn fix_standalone_commas(&self, lines: &mut Vec<Line>, arena: &[Node]) {
         let mut i = 0;
         while i < lines.len() {
-            if lines[i].is_standalone_comma(arena) && i > 0 {
-                let mut prev_idx = None;
-                for j in (0..i).rev() {
-                    if !lines[j].is_blank_line(arena) && !lines[j].is_standalone_comment_line(arena)
-                    {
-                        prev_idx = Some(j);
-                        break;
+            if !lines[i].is_standalone_comma(arena) || i == 0 {
+                i += 1;
+                continue;
+            }
+
+            let prev_idx = find_prev_content_line(lines, i, arena);
+            let Some(pi) = prev_idx else {
+                i += 1;
+                continue;
+            };
+
+            if is_jinja_block_line(&lines[pi], arena) {
+                i += 1;
+                continue;
+            }
+
+            let to_merge = vec![lines[pi].clone(), lines[i].clone()];
+            if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
+                if let Some(merged_line) = merged.into_iter().find(|l| !l.is_blank_line(arena)) {
+                    lines[pi] = merged_line;
+                    lines.remove(i);
+                    while pi + 1 < lines.len() && lines[pi + 1].is_blank_line(arena) {
+                        lines.remove(pi + 1);
                     }
-                }
-                if let Some(pi) = prev_idx {
-                    // Don't merge comma with Jinja block tags
-                    let prev_is_jinja_block = lines[pi]
-                        .first_content_node(arena)
-                        .map(|n| {
-                            matches!(
-                                n.token.token_type,
-                                crate::token::TokenType::JinjaBlockStart
-                                    | crate::token::TokenType::JinjaBlockKeyword
-                                    | crate::token::TokenType::JinjaBlockEnd
-                            )
-                        })
-                        .unwrap_or(false);
-                    if prev_is_jinja_block {
-                        i += 1;
-                        continue;
-                    }
-                    let to_merge = vec![lines[pi].clone(), lines[i].clone()];
-                    if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
-                        if let Some(merged_line) =
-                            merged.into_iter().find(|l| !l.is_blank_line(arena))
-                        {
-                            lines[pi] = merged_line;
-                            lines.remove(i);
-                            while pi + 1 < lines.len() && lines[pi + 1].is_blank_line(arena) {
-                                lines.remove(pi + 1);
-                            }
-                            continue;
-                        }
-                    }
+                    continue;
                 }
             }
             i += 1;
@@ -396,7 +382,9 @@ impl LineMerger {
                 nodes.push(node_idx);
             }
             has_multiline_jinja = line_has_multiline;
-            comments.extend(line.comments.clone());
+            if !line.comments.is_empty() {
+                comments.extend(line.comments.iter().cloned());
+            }
         }
 
         if nodes.is_empty() {
@@ -484,67 +472,66 @@ impl LineMerger {
         next_segment: Option<&Segment>,
         arena: &[Node],
     ) -> bool {
-        match segment.head(arena) {
-            Err(_) => false,
-            Ok((_, line)) => {
-                let first = line.first_content_node(arena);
-                match first {
-                    Some(n) if n.token.token_type == crate::token::TokenType::On => {
-                        if let Some(next) = next_segment {
-                            if let Ok((_, next_line)) = next.head(arena) {
-                                if let Some(nn) = next_line.first_content_node(arena) {
-                                    if nn.is_boolean_operator() {
-                                        return false;
-                                    }
-                                    if nn.is_operator(arena) {
-                                        return false;
-                                    }
-                                }
-                            }
-                            let next_has_multiline = next.lines.iter().any(|l| {
-                                l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja())
-                            });
-                            if next_has_multiline {
-                                return false;
-                            }
-                        }
-                        let has_multiline = segment
-                            .lines
-                            .iter()
-                            .any(|l| l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja()));
-                        if has_multiline {
-                            return false;
-                        }
-                        true
+        let (_, line) = match segment.head(arena) {
+            Err(_) => return false,
+            Ok(h) => h,
+        };
+        let first = match line.first_content_node(arena) {
+            None => return false,
+            Some(n) => n,
+        };
+
+        if first.token.token_type == crate::token::TokenType::On {
+            return self.should_merge_on_clause(segment, next_segment, arena);
+        }
+
+        if first.token.token_type == crate::token::TokenType::UntermKeyword
+            && first.value.eq_ignore_ascii_case("using")
+        {
+            return segment.lines.iter().any(|l| {
+                l.nodes
+                    .iter()
+                    .any(|&idx| arena[idx].token.token_type == crate::token::TokenType::BracketOpen)
+            });
+        }
+
+        if first.token.token_type == crate::token::TokenType::UntermKeyword
+            && first.value.eq_ignore_ascii_case("lateral")
+        {
+            let prev_ends_comma = prev_segment
+                .tail(arena)
+                .ok()
+                .map(|(_, tail_line)| tail_line.ends_with_comma(arena))
+                .unwrap_or(false);
+            if !prev_ends_comma {
+                return false;
+            }
+            return self.create_merged_line(&segment.lines, arena).is_ok();
+        }
+
+        false
+    }
+
+    /// Check if an ON clause should be stubbornly merged.
+    fn should_merge_on_clause(
+        &self,
+        segment: &Segment,
+        next_segment: Option<&Segment>,
+        arena: &[Node],
+    ) -> bool {
+        if let Some(next) = next_segment {
+            if let Ok((_, next_line)) = next.head(arena) {
+                if let Some(nn) = next_line.first_content_node(arena) {
+                    if nn.is_boolean_operator() || nn.is_operator(arena) {
+                        return false;
                     }
-                    Some(n)
-                        if n.token.token_type == crate::token::TokenType::UntermKeyword
-                            && n.value.eq_ignore_ascii_case("using") =>
-                    {
-                        segment.lines.iter().any(|l| {
-                            l.nodes.iter().any(|&idx| {
-                                arena[idx].token.token_type == crate::token::TokenType::BracketOpen
-                            })
-                        })
-                    }
-                    Some(n)
-                        if n.token.token_type == crate::token::TokenType::UntermKeyword
-                            && n.value.eq_ignore_ascii_case("lateral") =>
-                    {
-                        let prev_ends_comma = prev_segment
-                            .tail(arena)
-                            .ok()
-                            .map(|(_, tail_line)| tail_line.ends_with_comma(arena))
-                            .unwrap_or(false);
-                        if !prev_ends_comma {
-                            return false;
-                        }
-                        self.create_merged_line(&segment.lines, arena).is_ok()
-                    }
-                    _ => false,
                 }
             }
+            if segment_has_multiline_jinja(next, arena) {
+                return false;
+            }
         }
+        !segment_has_multiline_jinja(segment, arena)
     }
 
     /// Check if a segment continues an operator sequence.
@@ -603,7 +590,9 @@ impl LineMerger {
         }
 
         let mut iter = segments.into_iter();
-        let mut new_segments = vec![iter.next().unwrap()];
+        let mut new_segments = vec![iter
+            .next()
+            .expect("segments verified non-empty by len > 1 guard")];
         for segment in iter {
             if self.segment_continues_operator_sequence(
                 &segment,
@@ -736,6 +725,35 @@ impl LineMerger {
         new_segments.push(segment.clone());
         new_segments
     }
+}
+
+/// Find the previous non-blank, non-comment line before index `i`.
+fn find_prev_content_line(lines: &[Line], i: usize, arena: &[Node]) -> Option<usize> {
+    (0..i)
+        .rev()
+        .find(|&j| !lines[j].is_blank_line(arena) && !lines[j].is_standalone_comment_line(arena))
+}
+
+/// Check if a line starts with a Jinja block tag.
+fn is_jinja_block_line(line: &Line, arena: &[Node]) -> bool {
+    line.first_content_node(arena)
+        .map(|n| {
+            matches!(
+                n.token.token_type,
+                crate::token::TokenType::JinjaBlockStart
+                    | crate::token::TokenType::JinjaBlockKeyword
+                    | crate::token::TokenType::JinjaBlockEnd
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// Check if any line in a segment contains multiline Jinja.
+fn segment_has_multiline_jinja(segment: &Segment, arena: &[Node]) -> bool {
+    segment
+        .lines
+        .iter()
+        .any(|l| l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja()))
 }
 
 #[cfg(test)]

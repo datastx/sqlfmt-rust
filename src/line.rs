@@ -4,11 +4,11 @@ use crate::comment::Comment;
 use crate::node::{FmtDisabledVec, Node, NodeIndex};
 use crate::token::TokenType;
 
-/// Pre-computed indentation strings for common indent sizes (0..=80).
+/// Pre-computed indentation strings for common indent sizes (0..=200).
 /// Avoids allocating a new String on every `indentation()` call.
-/// Covers up to 20 nesting levels × 4 spaces each = 80 spaces.
+/// Covers up to 50 nesting levels × 4 spaces each = 200 spaces.
 static INDENT_CACHE: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
-    (0..=80)
+    (0..=200)
         .map(|n| {
             let s = " ".repeat(n);
             // Leak the string to get a 'static reference.
@@ -17,6 +17,16 @@ static INDENT_CACHE: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         })
         .collect()
 });
+
+/// Return a cached `&'static str` of `n` spaces. Avoids allocation for n <= 200.
+/// For n > 200, leaks a one-off string (should essentially never happen).
+pub fn indent_str(n: usize) -> &'static str {
+    if n <= 200 {
+        INDENT_CACHE[n]
+    } else {
+        &*Box::leak(" ".repeat(n).into_boxed_str())
+    }
+}
 
 /// A Line is a collection of Nodes intended to be printed on one line,
 /// plus any attached comments.
@@ -70,14 +80,7 @@ impl Line {
 
     /// Indentation prefix string. Returns a cached `&str` for common sizes.
     pub fn indentation<'a>(&self, arena: &[Node]) -> &'a str {
-        let size = self.indent_size(arena);
-        if size <= 80 {
-            INDENT_CACHE[size]
-        } else {
-            // Extremely deep nesting (>20 levels): leak a one-off string.
-            // This should essentially never happen in practice.
-            &*Box::leak(" ".repeat(size).into_boxed_str())
-        }
+        indent_str(self.indent_size(arena))
     }
 
     /// Render the line to a string (nodes only, no standalone comments).
@@ -111,17 +114,19 @@ impl Line {
     /// Uses the original token prefix and token text from the source.
     fn render_formatting_disabled(&self, arena: &[Node]) -> String {
         let mut result = String::new();
-        let mut trailing_ws = String::new();
+        let mut trailing_newline_idx: Option<NodeIndex> = None;
         for &idx in &self.nodes {
             let node = &arena[idx];
             if node.is_newline() {
-                trailing_ws = node.token.prefix.clone();
+                trailing_newline_idx = Some(idx);
                 continue;
             }
             result.push_str(&node.token.prefix);
-            result.push_str(&node.token.token);
+            result.push_str(&node.token.text);
         }
-        result.push_str(&trailing_ws);
+        if let Some(nl_idx) = trailing_newline_idx {
+            result.push_str(&arena[nl_idx].token.prefix);
+        }
         result.push('\n');
         result
     }

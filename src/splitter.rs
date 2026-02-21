@@ -16,7 +16,7 @@ use crate::token::{Token, TokenType};
 pub struct LineSplitter;
 
 impl LineSplitter {
-    pub fn new(_max_length: usize) -> Self {
+    pub fn new() -> Self {
         Self
     }
 
@@ -29,7 +29,11 @@ impl LineSplitter {
         }
 
         let mut new_lines: Vec<Line> = Vec::new();
-        let mut comments = line.comments.clone();
+        let mut comments = if line.comments.is_empty() {
+            Vec::new()
+        } else {
+            line.comments.clone()
+        };
         let mut head: usize = 0;
         let mut always_split_after = false;
         let mut never_split_after = false;
@@ -342,7 +346,7 @@ mod tests {
         line.append_node(a);
         line.append_node(nl);
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert_eq!(result.len(), 1);
     }
@@ -359,7 +363,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![select, name, from, table, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -379,7 +383,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![a, comma, b, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -399,7 +403,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![a, op, b, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -419,7 +423,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![open, name, close, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -439,7 +443,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![select, one, semi, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -460,7 +464,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![name, open, star, close, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -482,7 +486,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![arr, bracket, zero, close, nl];
 
-        let _splitter = LineSplitter::new(88);
+        let _splitter = LineSplitter::new();
         // is_bracket_operator checks previous_sql_token - in our test the [
         // follows Name "arr", so it should be a bracket operator
         assert!(arena[bracket].is_bracket_operator(&arena));
@@ -500,7 +504,7 @@ mod tests {
         line.nodes = vec![a, op, b, nl];
         line.formatting_disabled.push(0);
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert_eq!(result.len(), 1);
     }
@@ -516,7 +520,7 @@ mod tests {
         let mut line = Line::new(None);
         line.nodes = vec![one, union, two, nl];
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert!(
             result.len() >= 2,
@@ -533,7 +537,7 @@ mod tests {
         let mut line = Line::new(None);
         line.append_node(nl);
 
-        let splitter = LineSplitter::new(88);
+        let splitter = LineSplitter::new();
         let result = splitter.maybe_split(&line, &mut arena);
         assert_eq!(result.len(), 1);
         assert!(result[0].is_blank_line(&arena));

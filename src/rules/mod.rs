@@ -1,5 +1,3 @@
-#[allow(dead_code)]
-pub mod common;
 pub mod core;
 
 use std::sync::LazyLock;
@@ -12,10 +10,6 @@ use crate::token::TokenType;
 /// so we compile once and clone on each access. Regex::clone() is O(1) since
 /// it uses Arc internally.
 static MAIN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_main_rules);
-
-/// Cached compiled jinja rules.
-#[allow(dead_code)]
-static JINJA_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_jinja_rules);
 
 /// Cached compiled fmt:off rules.
 static FMT_OFF_RULES: LazyLock<Vec<Rule>> = LazyLock::new(core::fmt_off_rules);
@@ -589,11 +583,7 @@ fn build_main_rules() -> Vec<Rule> {
         "asc",
         "desc",
     ];
-    let word_op_pattern = word_ops
-        .iter()
-        .map(|op| op.to_string())
-        .collect::<Vec<_>>()
-        .join("|");
+    let word_op_pattern = word_ops.join("|");
     rules.push(Rule::new(
         "word_operator",
         1100,
@@ -833,11 +823,7 @@ fn build_main_rules() -> Vec<Rule> {
         r"add",
         "undrop",
     ];
-    let ddl_pattern = ddl_keywords
-        .iter()
-        .map(|k| k.to_string())
-        .collect::<Vec<_>>()
-        .join("|");
+    let ddl_pattern = ddl_keywords.join("|");
     rules.push(Rule::new(
         "unsupported_ddl",
         2999,
@@ -850,149 +836,6 @@ fn build_main_rules() -> Vec<Rule> {
             }),
         },
     ));
-
-    rules.sort_by_key(|r| r.priority);
-    rules
-}
-
-/// Get Jinja rules, cloned from a cached compiled version.
-#[allow(dead_code)]
-pub fn jinja_rules() -> Vec<Rule> {
-    JINJA_RULES.clone()
-}
-
-/// Build rules for the Jinja context.
-#[allow(dead_code)]
-fn build_jinja_rules() -> Vec<Rule> {
-    // Jinja block start patterns
-    let mut rules = vec![
-        // {% if ... %}
-        Rule::new(
-            "jinja_if_block_start",
-            200,
-            r"(\{%-?\s*if\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% elif ... %}
-        Rule::new(
-            "jinja_elif",
-            201,
-            r"(\{%-?\s*elif\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockKeyword,
-        ),
-        // {% else %}
-        Rule::new(
-            "jinja_else",
-            202,
-            r"(\{%-?\s*else\s*-?%\})",
-            Action::HandleJinjaBlockKeyword,
-        ),
-        // {% endif %}
-        Rule::new(
-            "jinja_endif",
-            203,
-            r"(\{%-?\s*endif\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% for ... %}
-        Rule::new(
-            "jinja_for_block_start",
-            210,
-            r"(\{%-?\s*for\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endfor %}
-        Rule::new(
-            "jinja_endfor",
-            211,
-            r"(\{%-?\s*endfor\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% macro ... %}
-        Rule::new(
-            "jinja_macro_start",
-            220,
-            r"(\{%-?\s*macro\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endmacro %}
-        Rule::new(
-            "jinja_endmacro",
-            221,
-            r"(\{%-?\s*endmacro\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% set ... %}
-        Rule::new(
-            "jinja_set_block_start",
-            100,
-            r"(\{%-?\s*set\s+[^=]+?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endset %}
-        Rule::new(
-            "jinja_endset",
-            101,
-            r"(\{%-?\s*endset\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% call ... %}
-        Rule::new(
-            "jinja_call_start",
-            260,
-            r"(\{%-?\s*call(?:\(.*?\))?\s+\w+[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endcall %}
-        Rule::new(
-            "jinja_endcall",
-            265,
-            r"(\{%-?\s*endcall\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% test ... %}
-        Rule::new(
-            "jinja_test_start",
-            230,
-            r"(\{%-?\s*test\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endtest %}
-        Rule::new(
-            "jinja_endtest",
-            231,
-            r"(\{%-?\s*endtest\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% snapshot ... %}
-        Rule::new(
-            "jinja_snapshot_start",
-            240,
-            r"(\{%-?\s*snapshot\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endsnapshot %}
-        Rule::new(
-            "jinja_endsnapshot",
-            241,
-            r"(\{%-?\s*endsnapshot\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-        // {% materialization ... %}
-        Rule::new(
-            "jinja_materialization_start",
-            250,
-            r"(\{%-?\s*materialization\b[\s\S]*?-?%\})",
-            Action::HandleJinjaBlockStart,
-        ),
-        // {% endmaterialization %}
-        Rule::new(
-            "jinja_endmaterialization",
-            251,
-            r"(\{%-?\s*endmaterialization\s*-?%\})",
-            Action::HandleJinjaBlockEnd,
-        ),
-    ];
 
     rules.sort_by_key(|r| r.priority);
     rules
@@ -1060,17 +903,5 @@ mod tests {
         assert!(set_rule.pattern.is_match("intersect"));
         assert!(set_rule.pattern.is_match("except"));
         assert!(set_rule.pattern.is_match("minus"));
-    }
-
-    #[test]
-    fn test_jinja_rules_created() {
-        let rules = jinja_rules();
-        assert!(rules.len() > 10);
-
-        let names: Vec<&str> = rules.iter().map(|r| r.name.as_str()).collect();
-        assert!(names.contains(&"jinja_if_block_start"));
-        assert!(names.contains(&"jinja_endif"));
-        assert!(names.contains(&"jinja_for_block_start"));
-        assert!(names.contains(&"jinja_endfor"));
     }
 }

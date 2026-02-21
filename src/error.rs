@@ -31,7 +31,6 @@ pub enum SqlfmtError {
 /// Internal control flow signals (never exposed to users).
 #[derive(Debug)]
 pub enum ControlFlow {
-    StopRulesetLexing,
     CannotMerge,
 }
 

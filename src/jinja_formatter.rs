@@ -1,5 +1,6 @@
-use crate::line::Line;
+use crate::line::{indent_str, Line};
 use crate::node::Node;
+use crate::string_utils::{skip_string_literal, skip_string_literal_into};
 use crate::token::TokenType;
 
 /// JinjaFormatter normalizes whitespace in Jinja tags and formats
@@ -196,23 +197,7 @@ impl JinjaFormatter {
                     result.push(' ');
                     in_whitespace = false;
                 }
-                let quote = bytes[i];
-                result.push(quote as char);
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        result.push(bytes[i] as char);
-                        result.push(bytes[i + 1] as char);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
+                i = skip_string_literal_into(bytes, i, &mut result);
                 continue;
             }
 
@@ -251,23 +236,7 @@ impl JinjaFormatter {
 
         while i < bytes.len() {
             if bytes[i] == b'\'' || bytes[i] == b'"' {
-                let quote = bytes[i];
-                result.push(quote as char);
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        result.push(bytes[i] as char);
-                        result.push(bytes[i + 1] as char);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
+                i = skip_string_literal_into(bytes, i, result);
                 continue;
             }
 
@@ -468,23 +437,7 @@ impl JinjaFormatter {
 
         while i < bytes.len() {
             if bytes[i] == b'\'' || bytes[i] == b'"' {
-                let quote = bytes[i];
-                result.push(quote as char);
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        result.push(bytes[i] as char);
-                        result.push(bytes[i + 1] as char);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
+                i = skip_string_literal_into(bytes, i, result);
                 continue;
             }
 
@@ -534,23 +487,7 @@ impl JinjaFormatter {
 
         while i < bytes.len() {
             if bytes[i] == b'\'' || bytes[i] == b'"' {
-                let quote = bytes[i];
-                result.push(quote as char);
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        result.push(bytes[i] as char);
-                        result.push(bytes[i + 1] as char);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
+                i = skip_string_literal_into(bytes, i, result);
                 continue;
             }
 
@@ -612,25 +549,34 @@ impl JinjaFormatter {
                         let list_content = &single_arg[1..single_arg.len() - 1];
                         let list_items = split_by_commas(list_content);
                         if list_items.len() > 1 {
-                            let indent1 = " ".repeat(base_indent + 4);
-                            let indent2 = " ".repeat(base_indent + 8);
-                            let indent3 = " ".repeat(base_indent + 12);
-                            let close_indent = " ".repeat(base_indent);
+                            let indent1 = indent_str(base_indent + 4);
+                            let indent2 = indent_str(base_indent + 8);
+                            let indent3 = indent_str(base_indent + 12);
+                            let close_indent = indent_str(base_indent);
 
-                            let mut lines = Vec::new();
-                            lines.push(open.to_string());
-                            lines.push(format!("{}{}(", indent1, func_name));
-                            lines.push(format!("{}[", indent2));
+                            let mut result = String::with_capacity(256);
+                            result.push_str(open);
+                            result.push('\n');
+                            result.push_str(indent1);
+                            result.push_str(func_name);
+                            result.push_str("(\n");
+                            result.push_str(indent2);
+                            result.push_str("[\n");
                             for item in &list_items {
                                 let trimmed_item = item.trim();
                                 if !trimmed_item.is_empty() {
-                                    lines.push(format!("{}{},", indent3, trimmed_item));
+                                    result.push_str(indent3);
+                                    result.push_str(trimmed_item);
+                                    result.push_str(",\n");
                                 }
                             }
-                            lines.push(format!("{}]", indent2));
-                            lines.push(format!("{})", indent1));
-                            lines.push(format!("{}{}", close_indent, close));
-                            return Some(lines.join("\n"));
+                            result.push_str(indent2);
+                            result.push_str("]\n");
+                            result.push_str(indent1);
+                            result.push_str(")\n");
+                            result.push_str(close_indent);
+                            result.push_str(close);
+                            return Some(result);
                         }
                     }
                     if single_arg.len() < 40 {
@@ -638,37 +584,40 @@ impl JinjaFormatter {
                     }
                 }
 
-                let indent1 = " ".repeat(base_indent + 4);
-                let indent2 = " ".repeat(base_indent + 8);
+                let indent1 = indent_str(base_indent + 4);
+                let indent2 = indent_str(base_indent + 8);
+                let close_indent = indent_str(base_indent);
 
-                let mut lines = Vec::new();
-                lines.push(open.to_string());
-                lines.push(format!("{}{}(", indent1, func_name));
+                let mut result = String::with_capacity(256);
+                result.push_str(open);
+                result.push('\n');
+                result.push_str(indent1);
+                result.push_str(func_name);
+                result.push_str("(\n");
                 for arg in &args {
                     let trimmed_arg = arg.trim();
                     if !trimmed_arg.is_empty() {
-                        lines.push(format!("{}{},", indent2, trimmed_arg));
+                        result.push_str(indent2);
+                        result.push_str(trimmed_arg);
+                        result.push_str(",\n");
                     }
                 }
-                // Remove trailing comma for single-arg functions,
-                // or if original didn't have trailing comma
-                if args.len() == 1 {
-                    if let Some(last) = lines.last_mut() {
-                        if last.ends_with(',') {
-                            last.pop();
-                        }
-                    }
+                // Remove trailing comma for single-arg functions
+                if args.len() == 1 && result.ends_with(",\n") {
+                    result.truncate(result.len() - 2);
+                    result.push('\n');
                 }
-                lines.push(format!("{})", indent1));
-                let close_indent = " ".repeat(base_indent);
-                lines.push(format!("{}{}", close_indent, close));
+                result.push_str(indent1);
+                result.push_str(")\n");
+                result.push_str(close_indent);
+                result.push_str(close);
 
-                return Some(lines.join("\n"));
+                return Some(result);
             }
         }
 
-        let indent1 = " ".repeat(base_indent + 4);
-        let close_indent = " ".repeat(base_indent);
+        let indent1 = indent_str(base_indent + 4);
+        let close_indent = indent_str(base_indent);
         Some(format!(
             "{}\n{}{}\n{}{}",
             open, indent1, inner, close_indent, close
@@ -717,33 +666,39 @@ impl JinjaFormatter {
                 let after_close = inner[close_pos + 1..].trim();
                 let args = split_by_commas(args_content);
 
-                let indent1 = " ".repeat(base_indent + 4);
+                let indent1 = indent_str(base_indent + 4);
+                let close_indent = indent_str(base_indent);
 
-                let mut lines = Vec::new();
-                lines.push(format!("{} {}(", open_delim, before_paren));
-                for arg in &args {
+                let mut result = String::with_capacity(256);
+                result.push_str(open_delim);
+                result.push(' ');
+                result.push_str(before_paren);
+                result.push('(');
+                let strip_trailing_comma = args.len() == 1 || !args_content.trim().ends_with(',');
+                let arg_count = args.len();
+                for (ai, arg) in args.iter().enumerate() {
                     let trimmed_arg = arg.trim();
                     if !trimmed_arg.is_empty() {
-                        lines.push(format!("{}{},", indent1, trimmed_arg));
+                        result.push('\n');
+                        result.push_str(indent1);
+                        result.push_str(trimmed_arg);
+                        if ai == arg_count - 1 && strip_trailing_comma {
+                            // Don't add trailing comma
+                        } else {
+                            result.push(',');
+                        }
                     }
                 }
-                // Last arg: remove trailing comma if the original didn't have one
-                // and there are multiple args (single-arg functions don't get trailing commas)
-                if let Some(last) = lines.last_mut() {
-                    if last.ends_with(',')
-                        && (args.len() == 1 || !args_content.trim().ends_with(','))
-                    {
-                        last.pop(); // remove trailing comma
-                    }
+                result.push('\n');
+                result.push_str(close_indent);
+                result.push_str(") ");
+                if !after_close.is_empty() {
+                    result.push_str(after_close);
+                    result.push(' ');
                 }
-                let close_indent = " ".repeat(base_indent);
-                if after_close.is_empty() {
-                    lines.push(format!("{}) {}", close_indent, close_delim));
-                } else {
-                    lines.push(format!("{}) {} {}", close_indent, after_close, close_delim));
-                }
+                result.push_str(close_delim);
 
-                return Some(lines.join("\n"));
+                return Some(result);
             }
         }
 
@@ -756,44 +711,60 @@ impl JinjaFormatter {
                 if items.len() <= 1 {
                     let tilde_parts = split_by_tilde(list_content);
                     if tilde_parts.len() > 1 {
-                        let indent1 = " ".repeat(base_indent + 4);
-                        let close_indent = " ".repeat(base_indent);
-                        let mut lines = Vec::new();
-                        lines.push(format!("{} {}[", open_delim, before_bracket));
+                        let indent1 = indent_str(base_indent + 4);
+                        let close_indent = indent_str(base_indent);
+                        let mut result = String::with_capacity(256);
+                        result.push_str(open_delim);
+                        result.push(' ');
+                        result.push_str(before_bracket);
+                        result.push('[');
                         for (i, part) in tilde_parts.iter().enumerate() {
                             let trimmed_part = part.trim();
-                            if i == 0 {
-                                lines.push(format!("{}{}", indent1, trimmed_part));
-                            } else {
-                                lines.push(format!("{}~ {}", indent1, trimmed_part));
+                            result.push('\n');
+                            result.push_str(indent1);
+                            if i > 0 {
+                                result.push_str("~ ");
                             }
+                            result.push_str(trimmed_part);
                         }
-                        lines.push(format!("{}] {}", close_indent, close_delim));
-                        return Some(lines.join("\n"));
+                        result.push('\n');
+                        result.push_str(close_indent);
+                        result.push_str("] ");
+                        result.push_str(close_delim);
+                        return Some(result);
                     }
                     return None;
                 }
 
-                let indent1 = " ".repeat(base_indent + 4);
-                let close_indent = " ".repeat(base_indent);
+                let indent1 = indent_str(base_indent + 4);
+                let close_indent = indent_str(base_indent);
 
-                let mut lines = Vec::new();
-                lines.push(format!("{} {}[", open_delim, before_bracket));
+                let mut result = String::with_capacity(256);
+                result.push_str(open_delim);
+                result.push(' ');
+                result.push_str(before_bracket);
+                result.push('[');
                 for item in &items {
                     let trimmed_item = item.trim();
                     if !trimmed_item.is_empty() {
-                        lines.push(format!("{}{},", indent1, trimmed_item));
+                        result.push('\n');
+                        result.push_str(indent1);
+                        result.push_str(trimmed_item);
+                        result.push(',');
                     }
                 }
-                lines.push(format!("{}] {}", close_indent, close_delim));
+                result.push('\n');
+                result.push_str(close_indent);
+                result.push_str("] ");
+                result.push_str(close_delim);
 
-                return Some(lines.join("\n"));
+                return Some(result);
             }
         }
 
         if inner.len() + open_delim.len() + close_delim.len() + 4 > self.max_length {
-            let indent1 = " ".repeat(base_indent + 4);
-            let close_indent = " ".repeat(base_indent);
+            let indent1 = indent_str(base_indent + 4);
+            let close_indent = indent_str(base_indent);
             return Some(format!(
                 "{} \n{}{}\n{}{}",
                 open_delim, indent1, inner, close_indent, close_delim
@@ -812,17 +783,7 @@ fn has_trailing_comma_in_brackets(value: &str) -> bool {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let quote = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b',' {
@@ -853,16 +814,7 @@ fn has_complex_structure_outside_strings(s: &str) -> bool {
                 // Triple-quoted strings ARE complex structure
                 return true;
             }
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b'{' {
@@ -880,17 +832,7 @@ fn find_top_level_bracket(s: &str) -> Option<usize> {
     let mut paren_depth = 0;
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let quote = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b'(' {
@@ -912,17 +854,7 @@ fn find_top_level_paren(s: &str) -> Option<usize> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let quote = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b'(' {
@@ -933,14 +865,8 @@ fn find_top_level_paren(s: &str) -> Option<usize> {
             let mut j = i + 1;
             while j < bytes.len() && depth > 0 {
                 if bytes[j] == b'\'' || bytes[j] == b'"' {
-                    let q = bytes[j];
-                    j += 1;
-                    while j < bytes.len() && bytes[j] != q {
-                        if bytes[j] == b'\\' && j + 1 < bytes.len() {
-                            j += 1;
-                        }
-                        j += 1;
-                    }
+                    j = skip_string_literal(bytes, j);
+                    continue;
                 } else if bytes[j] == b'(' {
                     depth += 1;
                 } else if bytes[j] == b')' {
@@ -967,14 +893,8 @@ fn find_matching_close(s: &str, open_pos: usize) -> Option<usize> {
     let mut i = open_pos + 1;
     while i < bytes.len() && depth > 0 {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let q = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != q {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
+            continue;
         } else if bytes[i] == b'(' {
             depth += 1;
         } else if bytes[i] == b')' {
@@ -989,7 +909,8 @@ fn find_matching_close(s: &str, open_pos: usize) -> Option<usize> {
 }
 
 /// Split content by top-level commas (respecting parentheses, brackets, strings).
-fn split_by_commas(s: &str) -> Vec<String> {
+/// Returns borrowed slices to avoid per-part String allocations.
+fn split_by_commas(s: &str) -> Vec<&str> {
     let bytes = s.as_bytes();
     let mut parts = Vec::new();
     let mut depth = 0;
@@ -998,17 +919,7 @@ fn split_by_commas(s: &str) -> Vec<String> {
 
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let quote = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b'(' || bytes[i] == b'[' || bytes[i] == b'{' {
@@ -1016,7 +927,7 @@ fn split_by_commas(s: &str) -> Vec<String> {
         } else if bytes[i] == b')' || bytes[i] == b']' || bytes[i] == b'}' {
             depth -= 1;
         } else if bytes[i] == b',' && depth == 0 {
-            parts.push(s[start..i].to_string());
+            parts.push(&s[start..i]);
             start = i + 1;
         }
         i += 1;
@@ -1024,14 +935,15 @@ fn split_by_commas(s: &str) -> Vec<String> {
     if start < s.len() {
         let remaining = s[start..].trim();
         if !remaining.is_empty() {
-            parts.push(s[start..].to_string());
+            parts.push(&s[start..]);
         }
     }
     parts
 }
 
 /// Split content by top-level `~` (tilde) operators (respecting strings and brackets).
-fn split_by_tilde(s: &str) -> Vec<String> {
+/// Returns borrowed slices to avoid per-part String allocations.
+fn split_by_tilde(s: &str) -> Vec<&str> {
     let bytes = s.as_bytes();
     let mut parts = Vec::new();
     let mut depth = 0;
@@ -1040,17 +952,7 @@ fn split_by_tilde(s: &str) -> Vec<String> {
 
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
-            let quote = bytes[i];
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
+            i = skip_string_literal(bytes, i);
             continue;
         }
         if bytes[i] == b'(' || bytes[i] == b'[' || bytes[i] == b'{' {
@@ -1058,7 +960,7 @@ fn split_by_tilde(s: &str) -> Vec<String> {
         } else if bytes[i] == b')' || bytes[i] == b']' || bytes[i] == b'}' {
             depth -= 1;
         } else if bytes[i] == b'~' && depth == 0 {
-            parts.push(s[start..i].to_string());
+            parts.push(&s[start..i]);
             start = i + 1;
         }
         i += 1;
@@ -1066,7 +968,7 @@ fn split_by_tilde(s: &str) -> Vec<String> {
     if start < s.len() {
         let remaining = s[start..].trim();
         if !remaining.is_empty() {
-            parts.push(s[start..].to_string());
+            parts.push(&s[start..]);
         }
     }
     parts

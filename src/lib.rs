@@ -19,6 +19,7 @@ pub(crate) mod rule;
 pub(crate) mod rules;
 pub(crate) mod segment;
 pub(crate) mod splitter;
+pub(crate) mod string_utils;
 pub(crate) mod token;
 
 // Re-export the main public API
