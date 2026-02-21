@@ -372,7 +372,7 @@ pub fn core_rules() -> Vec<Rule> {
             420,
             r"(::)",
             Action::AddNode {
-                token_type: TokenType::DoublColon,
+                token_type: TokenType::DoubleColon,
             },
         ),
         // Walrus operator :=

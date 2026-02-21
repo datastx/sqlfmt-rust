@@ -11,19 +11,15 @@ use crate::report::{FileResult, Report};
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
     let dialect = mode.dialect().map_err(SqlfmtError::Config)?;
 
-    // Step 1: Lex (parse tokens)
     let mut analyzer = dialect.initialize_analyzer(mode.line_length);
     let mut query = analyzer.parse_query(source)?;
     let mut arena = std::mem::take(&mut analyzer.arena);
 
-    // Step 2: Format (5-stage pipeline)
     let formatter = QueryFormatter::new(mode.line_length, mode.no_jinjafmt);
     formatter.format(&mut query, &mut arena);
 
-    // Step 3: Render
     let result = query.render(&arena);
 
-    // Step 4: Safety check (optional)
     if mode.should_safety_check() {
         safety_check(source, &result, mode)?;
     }
@@ -42,7 +38,6 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
             report.add(result);
         }
     } else {
-        // Parallel processing with rayon
         use rayon::prelude::*;
 
         let num_threads = if mode.threads > 0 {
@@ -113,7 +108,6 @@ fn format_file(path: &Path, mode: &Mode) -> FileResult {
         };
     }
 
-    // Write formatted output
     match std::fs::write(path, &formatted) {
         Ok(_) => FileResult {
             path: path.to_path_buf(),
@@ -235,14 +229,12 @@ fn safety_check(original: &str, formatted: &str, mode: &Mode) -> Result<(), Sqlf
     }
 
     for (i, (n1, n2)) in tokens1.iter().zip(tokens2.iter()).enumerate() {
-        // Compare token type
         if n1.token.token_type != n2.token.token_type {
             return Err(SqlfmtError::Equivalence(format!(
                 "Token type mismatch at position {}: original {:?} '{}', formatted {:?} '{}'",
                 i, n1.token.token_type, n1.token.token, n2.token.token_type, n2.token.token
             )));
         }
-        // Compare token text (case-insensitive for keywords)
         let t1 = n1.token.token.to_lowercase();
         let t2 = n2.token.token.to_lowercase();
         // Normalize whitespace for multi-word tokens and Jinja delimiters

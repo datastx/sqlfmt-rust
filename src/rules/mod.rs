@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub mod common;
 pub mod core;
 
@@ -13,6 +14,7 @@ use crate::token::TokenType;
 static MAIN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_main_rules);
 
 /// Cached compiled jinja rules.
+#[allow(dead_code)]
 static JINJA_RULES: LazyLock<Vec<Rule>> = LazyLock::new(build_jinja_rules);
 
 /// Cached compiled fmt:off rules.
@@ -146,7 +148,6 @@ fn build_grant_rules() -> Vec<Rule> {
 /// Build CREATE/ALTER FUNCTION rules: CORE + function-specific keywords.
 fn build_function_rules() -> Vec<Rule> {
     let mut rules = core::core_rules();
-    // AS keyword → HandleDdlAs
     rules.push(Rule::new(
         "function_as",
         1100,
@@ -850,17 +851,18 @@ fn build_main_rules() -> Vec<Rule> {
         },
     ));
 
-    // Sort by priority
     rules.sort_by_key(|r| r.priority);
     rules
 }
 
 /// Get Jinja rules, cloned from a cached compiled version.
+#[allow(dead_code)]
 pub fn jinja_rules() -> Vec<Rule> {
     JINJA_RULES.clone()
 }
 
 /// Build rules for the Jinja context.
+#[allow(dead_code)]
 fn build_jinja_rules() -> Vec<Rule> {
     // Jinja block start patterns
     let mut rules = vec![

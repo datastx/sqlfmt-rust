@@ -965,6 +965,8 @@ When reviewing Rust code, check:
 - **No inline comments**: Code is self-explanatory; only "why" comments survive review
 - **Test separation**: Tests in `tests/` directory with fixtures
 - **Clippy clean**: `cargo clippy -- -D warnings` passes
+- **No dead code**: No unused functions, structs, imports, variables, or commented-out code
+- **`make ci` passes**: Every phase/task must end with a clean `make ci` run
 - **No `Rc<RefCell<T>>`** in application code without justification
 
 ---
@@ -983,19 +985,89 @@ These patterns make clean code the path of least resistance in Rust:
 8. **Clippy is law** — no exceptions
 9. **Visibility is minimal** — private by default, `pub` only when genuinely public API
 10. **Structured tokens/nodes over raw string manipulation** — lex first, then transform
+11. **Analyze first, plan second, code third** — every non-trivial task starts with an implementation plan
+12. **`make ci` is the phase gate** — must pass after every phase/task before proceeding
+13. **No dead code** — unused code is deleted, not commented out or suppressed
 
 For detailed examples and supporting documentation, see [examples.md](examples.md).
 
 ---
 
+## Analysis & Implementation Planning
+
+**Every non-trivial task MUST begin with analysis that produces an implementation plan.** Do not jump straight to coding.
+
+### Required steps
+
+1. **Analyze**: Read relevant code, understand the current state, identify what needs to change and where.
+2. **Plan**: Produce a concrete, phased implementation plan with clear deliverables per phase. Each phase should be a self-contained unit of work that leaves the codebase in a compilable, passing state.
+3. **Execute phase-by-phase**: Work through each phase sequentially. After completing each phase, run `make ci` before moving to the next.
+
+### Plan format
+
+```
+## Implementation Plan
+
+### Phase 1: <short title>
+- What: <concrete changes>
+- Files: <files to touch>
+- Acceptance: <how to verify this phase is done>
+
+### Phase 2: <short title>
+...
+```
+
+---
+
+## Phase Gate: `make ci`
+
+**After completing every phase or task, run `make ci` before proceeding.** This is a hard gate — do not move to the next phase until `make ci` passes clean.
+
+`make ci` runs: `cargo fmt --all -- --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build --release`
+
+If `make ci` fails:
+1. Fix the issue immediately
+2. Re-run `make ci` until it passes
+3. Only then proceed to the next phase
+
+This applies to:
+- Each phase in an implementation plan
+- Any standalone task or bug fix
+- Refactoring steps
+- Test additions
+
+---
+
+## No Dead Code
+
+**Dead code is not allowed.** The codebase must stay clean of unused items at all times.
+
+### Rules
+
+- **No unused functions, methods, structs, enums, traits, or modules** — if it's not called, delete it
+- **No commented-out code** — use version control, not comments, to preserve old code
+- **No `#[allow(dead_code)]`** — this annotation is banned; fix the root cause instead
+- **No unused imports** — `cargo clippy` catches these; fix them immediately
+- **No unused variables** — prefix with `_` only if the variable is genuinely required by a trait or API signature but intentionally unused; never use `_` prefix to suppress warnings on code you forgot to clean up
+- **No vestigial parameters** — if a function parameter is no longer used, remove it and update all call sites
+
+### When removing code
+
+- When a refactor makes code unreachable, delete it in the same phase
+- When replacing an implementation, remove the old one — don't leave both
+- Run `cargo clippy -- -D warnings` (part of `make ci`) to catch any dead code warnings
+
+---
+
 ## Verification
 
-**After every unit of work, run local tests before moving on.** Use:
-- `cargo test` — run all tests
-- `cargo clippy -- -D warnings` — enforce clippy
-- `cargo fmt` — format code
+**After every unit of work, run `make ci` before moving on.** This is the single gate command:
 
-Do not proceed to the next task until all checks pass.
+```bash
+make ci
+```
+
+This runs fmt check, clippy, tests, and release build. Do not proceed to the next task until `make ci` passes clean. Do not skip any of its sub-checks.
 
 ---
 name: review-rust-code

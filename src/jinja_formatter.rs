@@ -41,8 +41,7 @@ impl JinjaFormatter {
             }
         }
 
-        // After normalization, check if any Jinja tags need multiline formatting.
-        // Also handle "magic trailing comma" — if a list has a trailing comma,
+        // "Magic trailing comma" — if a list has a trailing comma,
         // always format as multiline (matching black's behavior).
         for &idx in &line.nodes {
             let node = &arena[idx];
@@ -103,16 +102,7 @@ impl JinjaFormatter {
             return None;
         }
 
-        // Normalize whitespace (collapse internal whitespace including newlines)
-        let inner = Self::normalize_inner_whitespace(inner);
-        // Normalize quotes (single → double) matching black's behavior
-        let inner = Self::normalize_quotes(&inner);
-        // Add spaces around operators
-        let inner = Self::add_operator_spaces(&inner);
-        // Add spaces after commas
-        let inner = Self::add_comma_spaces(&inner);
-        // Strip spaces inside parens/brackets
-        let inner = Self::strip_paren_spaces(&inner);
+        let inner = Self::normalize_chain(inner);
 
         Some(format!("{} {} {}", open, inner, close))
     }
@@ -167,14 +157,28 @@ impl JinjaFormatter {
             return Some(result);
         }
 
-        // Try collapsing to single line
-        let normalized = Self::normalize_inner_whitespace(inner);
-        let normalized = Self::normalize_quotes(&normalized);
-        let normalized = Self::add_operator_spaces(&normalized);
-        let normalized = Self::add_comma_spaces(&normalized);
-        let normalized = Self::strip_paren_spaces(&normalized);
+        let normalized = Self::normalize_chain(inner);
 
         Some(format!("{} {} {}", open, normalized, close))
+    }
+
+    /// Run the full normalization chain using two reusable buffers (ping-pong).
+    /// Reduces allocations from 5 (one per step) to 2 reused buffers.
+    fn normalize_chain(inner: &str) -> String {
+        // Step 1: normalize_inner_whitespace → buf_a
+        let mut buf_a = Self::normalize_inner_whitespace(inner);
+        // Step 2: normalize_quotes: buf_a → buf_b
+        let mut buf_b = Self::normalize_quotes(&buf_a);
+        // Step 3: add_operator_spaces: buf_b → reuse buf_a
+        buf_a.clear();
+        Self::add_operator_spaces_into(&buf_b, &mut buf_a);
+        // Step 4: add_comma_spaces: buf_a → reuse buf_b
+        buf_b.clear();
+        Self::add_comma_spaces_into(&buf_a, &mut buf_b);
+        // Step 5: strip_paren_spaces: buf_b → reuse buf_a
+        buf_a.clear();
+        Self::strip_paren_spaces_into(&buf_b, &mut buf_a);
+        buf_a
     }
 
     /// Normalize internal whitespace in Jinja content, respecting strings.
@@ -187,7 +191,6 @@ impl JinjaFormatter {
         let mut in_whitespace = false;
 
         while i < bytes.len() {
-            // Handle string literals
             if bytes[i] == b'\'' || bytes[i] == b'"' {
                 if in_whitespace {
                     result.push(' ');
@@ -213,7 +216,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // Handle whitespace
             if bytes[i].is_ascii_whitespace() {
                 in_whitespace = true;
                 i += 1;
@@ -233,14 +235,21 @@ impl JinjaFormatter {
     /// Add spaces around operators in Jinja content (like black).
     /// Handles: +, |, ~, = (at depth 0), ==, !=, >=, <=
     /// Does NOT modify operators inside strings.
+    #[cfg(test)]
     fn add_operator_spaces(content: &str) -> String {
-        let bytes = content.as_bytes();
         let mut result = String::with_capacity(content.len() + 16);
+        Self::add_operator_spaces_into(content, &mut result);
+        result
+    }
+
+    /// Add operator spaces, writing into the provided buffer.
+    fn add_operator_spaces_into(content: &str, result: &mut String) {
+        result.reserve(content.len() + 16);
+        let bytes = content.as_bytes();
         let mut i = 0;
         let mut paren_depth: i32 = 0;
 
         while i < bytes.len() {
-            // Skip strings
             if bytes[i] == b'\'' || bytes[i] == b'"' {
                 let quote = bytes[i];
                 result.push(quote as char);
@@ -262,7 +271,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // Track parenthesis depth
             if bytes[i] == b'(' || bytes[i] == b'[' {
                 paren_depth += 1;
                 result.push(bytes[i] as char);
@@ -276,7 +284,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // Check for multi-char comparison operators: ==, !=, >=, <=
             if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
                 let is_comparison = matches!(bytes[i], b'=' | b'!' | b'>' | b'<');
                 if is_comparison {
@@ -298,7 +305,6 @@ impl JinjaFormatter {
                 }
             }
 
-            // Check for operators: +, |, ~
             let is_operator = match bytes[i] {
                 b'+' => i + 1 >= bytes.len() || bytes[i + 1] != b'=', // + but not +=
                 b'|' => i + 1 >= bytes.len() || bytes[i + 1] != b'|', // | but not ||
@@ -309,9 +315,7 @@ impl JinjaFormatter {
             };
 
             if is_operator {
-                // Ensure space before: trim trailing whitespace, then add one space
                 let trimmed_len = result.trim_end().len();
-                // Don't add space after opening paren/bracket
                 if trimmed_len > 0 {
                     let last_non_ws = result.as_bytes()[trimmed_len - 1];
                     if last_non_ws != b'(' && last_non_ws != b'[' {
@@ -321,11 +325,9 @@ impl JinjaFormatter {
                 }
                 result.push(bytes[i] as char);
                 i += 1;
-                // Skip any whitespace after operator
                 while i < bytes.len() && bytes[i] == b' ' {
                     i += 1;
                 }
-                // Add exactly one space after (unless at end or before closing paren/bracket)
                 if i < bytes.len() && bytes[i] != b')' && bytes[i] != b']' {
                     result.push(' ');
                 }
@@ -335,7 +337,6 @@ impl JinjaFormatter {
             result.push(bytes[i] as char);
             i += 1;
         }
-        result
     }
 
     /// Normalize Python string quotes inside Jinja content.
@@ -346,9 +347,7 @@ impl JinjaFormatter {
         let mut result = String::with_capacity(content.len());
         let mut i = 0;
         while i < bytes.len() {
-            // Skip double-quoted strings entirely (preserve as-is)
             if bytes[i] == b'"' {
-                // Check for triple-double-quote (""")
                 if i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
                     result.push_str("\"\"\"");
                     i += 3;
@@ -386,7 +385,6 @@ impl JinjaFormatter {
                 continue;
             }
             if bytes[i] == b'\'' {
-                // Check for triple-single-quote (''')
                 if i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
                     let start = i;
                     i += 3;
@@ -421,7 +419,6 @@ impl JinjaFormatter {
                     }
                     continue;
                 }
-                // Find the matching closing single quote
                 let start = i;
                 i += 1;
                 let mut has_double_quote = false;
@@ -442,10 +439,9 @@ impl JinjaFormatter {
                 }
                 if let Some(end_pos) = end {
                     if has_double_quote {
-                        // Keep single quotes if string contains double quotes
+                        // Keep single quotes if string contains unescaped double quotes
                         result.push_str(&content[start..=end_pos]);
                     } else {
-                        // Convert to double quotes
                         result.push('"');
                         result.push_str(&content[start + 1..end_pos]);
                         result.push('"');
@@ -464,15 +460,13 @@ impl JinjaFormatter {
         result
     }
 
-    /// Strip spaces immediately after `(` and `[`, and before `)` and `]`.
-    /// Matches black's behavior of removing whitespace inside brackets.
-    fn strip_paren_spaces(content: &str) -> String {
+    /// Strip paren spaces, writing into the provided buffer.
+    fn strip_paren_spaces_into(content: &str, result: &mut String) {
+        result.reserve(content.len());
         let bytes = content.as_bytes();
-        let mut result = String::with_capacity(content.len());
         let mut i = 0;
 
         while i < bytes.len() {
-            // Skip strings
             if bytes[i] == b'\'' || bytes[i] == b'"' {
                 let quote = bytes[i];
                 result.push(quote as char);
@@ -494,7 +488,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // Before ( in function calls, remove spaces: "func (" -> "func("
             if bytes[i] == b'(' {
                 let trimmed_len = result.trim_end().len();
                 if trimmed_len > 0 {
@@ -511,7 +504,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // After [, skip spaces
             if bytes[i] == b'[' {
                 result.push(bytes[i] as char);
                 i += 1;
@@ -521,7 +513,6 @@ impl JinjaFormatter {
                 continue;
             }
 
-            // Before ) or ], remove trailing spaces from result
             if bytes[i] == b')' || bytes[i] == b']' {
                 let trimmed = result.trim_end().len();
                 result.truncate(trimmed);
@@ -533,19 +524,15 @@ impl JinjaFormatter {
             result.push(bytes[i] as char);
             i += 1;
         }
-        result
     }
 
-    /// Add spaces after commas in Jinja content (like black).
-    /// Ensures `func(a,b)` becomes `func(a, b)`.
-    /// Does NOT modify commas inside string literals.
-    fn add_comma_spaces(content: &str) -> String {
+    /// Add comma spaces, writing into the provided buffer.
+    fn add_comma_spaces_into(content: &str, result: &mut String) {
+        result.reserve(content.len() + 16);
         let bytes = content.as_bytes();
-        let mut result = String::with_capacity(content.len() + 16);
         let mut i = 0;
 
         while i < bytes.len() {
-            // Skip strings
             if bytes[i] == b'\'' || bytes[i] == b'"' {
                 let quote = bytes[i];
                 result.push(quote as char);
@@ -570,11 +557,9 @@ impl JinjaFormatter {
             if bytes[i] == b',' {
                 result.push(',');
                 i += 1;
-                // Skip existing spaces after comma
                 while i < bytes.len() && bytes[i] == b' ' {
                     i += 1;
                 }
-                // Add exactly one space (unless at end or before closing bracket)
                 if i < bytes.len() && bytes[i] != b')' && bytes[i] != b']' && bytes[i] != b'}' {
                     result.push(' ');
                 }
@@ -584,7 +569,6 @@ impl JinjaFormatter {
             result.push(bytes[i] as char);
             i += 1;
         }
-        result
     }
 
     /// Format a Jinja expression as multiline when it would exceed max_length.
@@ -615,17 +599,14 @@ impl JinjaFormatter {
             ("}}", inner)
         };
 
-        // Find the top-level function call pattern: name(...)
         let inner = inner.trim();
         if let Some(paren_pos) = find_top_level_paren(inner) {
-            // Check if the content ends with )
             if inner.ends_with(')') {
                 let func_name = inner[..paren_pos].trim();
                 let args_content = &inner[paren_pos + 1..inner.len() - 1];
                 let args = split_by_commas(args_content);
 
                 if args.len() <= 1 {
-                    // Single argument: check if it's a list literal that needs expanding
                     let single_arg = args.first().map(|a| a.trim()).unwrap_or("");
                     if single_arg.starts_with('[') && single_arg.ends_with(']') {
                         let list_content = &single_arg[1..single_arg.len() - 1];
@@ -686,7 +667,6 @@ impl JinjaFormatter {
             }
         }
 
-        // No function call pattern — try simple multiline with content on its own line
         let indent1 = " ".repeat(base_indent + 4);
         let close_indent = " ".repeat(base_indent);
         Some(format!(
@@ -708,7 +688,6 @@ impl JinjaFormatter {
     fn format_statement_multiline(&self, value: &str, base_indent: usize) -> Option<String> {
         let trimmed = value.trim();
 
-        // Determine the tag type ({%, {%-, etc.)
         let (open_delim, inner, close_delim) = if trimmed.starts_with("{%-") {
             if trimmed.ends_with("-%}") {
                 ("{%-", &trimmed[3..trimmed.len() - 3], "-%}")
@@ -731,9 +710,7 @@ impl JinjaFormatter {
 
         let inner = inner.trim();
 
-        // Look for function call pattern: keyword name(args)
         if let Some(paren_pos) = find_top_level_paren(inner) {
-            // Find the matching closing ) for this (
             if let Some(close_pos) = find_matching_close(inner, paren_pos) {
                 let before_paren = &inner[..paren_pos];
                 let args_content = &inner[paren_pos + 1..close_pos];
@@ -770,7 +747,6 @@ impl JinjaFormatter {
             }
         }
 
-        // Look for list assignment pattern: keyword name = [items]
         if let Some(bracket_pos) = find_top_level_bracket(inner) {
             if inner.ends_with(']') {
                 let before_bracket = &inner[..bracket_pos];
@@ -778,7 +754,6 @@ impl JinjaFormatter {
                 let items = split_by_commas(list_content);
 
                 if items.len() <= 1 {
-                    // Single-item list: try splitting at ~ (tilde) operators
                     let tilde_parts = split_by_tilde(list_content);
                     if tilde_parts.len() > 1 {
                         let indent1 = " ".repeat(base_indent + 4);
@@ -816,8 +791,6 @@ impl JinjaFormatter {
             }
         }
 
-        // For very long statements without function calls or lists, try wrapping
-        // the statement content at the tag's indentation level
         if inner.len() + open_delim.len() + close_delim.len() + 4 > self.max_length {
             let indent1 = " ".repeat(base_indent + 4);
             let close_indent = " ".repeat(base_indent);
@@ -835,7 +808,6 @@ impl JinjaFormatter {
 /// This implements "magic trailing comma" behavior from Python's black formatter:
 /// if a list or function call has a trailing comma, it should always be formatted as multiline.
 fn has_trailing_comma_in_brackets(value: &str) -> bool {
-    // Look for ,) or ,] pattern outside of strings
     let bytes = value.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -854,7 +826,6 @@ fn has_trailing_comma_in_brackets(value: &str) -> bool {
             continue;
         }
         if bytes[i] == b',' {
-            // Check if next non-whitespace char is ) or ]
             let mut j = i + 1;
             while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                 j += 1;
@@ -878,12 +849,10 @@ fn has_complex_structure_outside_strings(s: &str) -> bool {
     while i < bytes.len() {
         if bytes[i] == b'\'' || bytes[i] == b'"' {
             let quote = bytes[i];
-            // Check for triple quote
             if i + 2 < bytes.len() && bytes[i + 1] == quote && bytes[i + 2] == quote {
                 // Triple-quoted strings ARE complex structure
                 return true;
             }
-            // Regular string - skip it entirely
             i += 1;
             while i < bytes.len() && bytes[i] != quote {
                 if bytes[i] == b'\\' && i + 1 < bytes.len() {
@@ -979,12 +948,10 @@ fn find_top_level_paren(s: &str) -> Option<usize> {
                 }
                 j += 1;
             }
-            // Content between parens (excluding the parens themselves)
             let content = &s[paren_start + 1..j.saturating_sub(1)];
             if !content.trim().is_empty() {
                 return Some(paren_start);
             }
-            // Empty parens — skip past them and continue searching
             i = j;
             continue;
         }

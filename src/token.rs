@@ -24,7 +24,7 @@ pub enum TokenType {
     Number,
     BracketOpen,
     BracketClose,
-    DoublColon,
+    DoubleColon,
     Colon,
     Operator,
     WordOperator,
@@ -69,7 +69,7 @@ impl TokenType {
     pub fn is_always_operator(self) -> bool {
         matches!(
             self,
-            Self::Operator | Self::WordOperator | Self::On | Self::DoublColon | Self::Colon
+            Self::Operator | Self::WordOperator | Self::On | Self::DoubleColon | Self::Colon
         )
     }
 
@@ -97,7 +97,7 @@ impl TokenType {
                 | Self::Newline
                 | Self::BracketClose
                 | Self::CommentEnd
-                | Self::DoublColon
+                | Self::DoubleColon
                 | Self::Colon
         )
     }

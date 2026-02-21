@@ -26,10 +26,8 @@ impl QueryFormatter {
 
     /// Run the full formatting pipeline on a query.
     pub fn format(&self, query: &mut Query, arena: &mut Vec<Node>) {
-        // Stage 1: Split long lines
         self.split_lines(query, arena);
 
-        // Stage 2: Format Jinja tags
         if !self.no_jinjafmt {
             self.format_jinja(query, arena);
         }
@@ -39,13 +37,10 @@ impl QueryFormatter {
         // so split before those multiline nodes.
         self.split_multiline_jinja(query, arena);
 
-        // Stage 3: Dedent Jinja blocks
         self.dedent_jinja_blocks(query, arena);
 
-        // Stage 4: Merge short lines
         self.merge_lines(query, arena);
 
-        // Stage 5: Remove extra blank lines
         self.remove_extra_blank_lines(query, arena);
     }
 
@@ -76,13 +71,13 @@ impl QueryFormatter {
     /// `= {{ very_long_multiline }}` (gets split because it exceeds the limit).
     /// Lines starting with ON + multiline Jinja are never split (join conditions).
     fn split_multiline_jinja(&self, query: &mut Query, arena: &mut Vec<Node>) {
-        let mut new_lines = Vec::new();
-        for line in &query.lines {
+        let old_lines = std::mem::take(&mut query.lines);
+        let mut new_lines = Vec::with_capacity(old_lines.len());
+        for line in old_lines {
             if line.has_formatting_disabled() {
-                new_lines.push(line.clone());
+                new_lines.push(line);
                 continue;
             }
-            // Check if a multiline Jinja node needs to be split from preceding content.
             let mut content_count = 0;
             let mut multiline_count = 0;
             let mut first_content_is_on = false;
@@ -125,19 +120,16 @@ impl QueryFormatter {
 
             if needs_split {
                 if let Some(split_pos) = first_multiline_pos {
-                    // Split the line before the first multiline Jinja node.
                     let prev_idx = if split_pos > 0 {
                         Some(line.nodes[split_pos - 1])
                     } else {
                         line.previous_node
                     };
 
-                    // Line 1: nodes before split_pos + newline
                     let mut line1 = Line::new(line.previous_node);
                     for &idx in &line.nodes[..split_pos] {
                         line1.append_node(idx);
                     }
-                    // Add a newline node for line1 (inherit open_brackets/open_jinja_blocks)
                     let spos = prev_idx.map(|i| arena[i].token.epos).unwrap_or(0);
                     let nl_token = crate::token::Token::new(
                         crate::token::TokenType::Newline,
@@ -163,29 +155,27 @@ impl QueryFormatter {
                     line1.append_node(nl_idx);
                     line1.formatting_disabled = line.formatting_disabled.clone();
 
-                    // Line 2: nodes from split_pos onwards (including original newline)
                     let mut line2 = Line::new(prev_idx);
                     for &idx in &line.nodes[split_pos..] {
                         line2.append_node(idx);
                     }
-                    line2.formatting_disabled = line.formatting_disabled.clone();
+                    line2.formatting_disabled = line.formatting_disabled;
 
-                    // Distribute comments
-                    for comment in &line.comments {
+                    for comment in line.comments {
                         if comment.is_standalone {
-                            line2.append_comment(comment.clone());
+                            line2.append_comment(comment);
                         } else {
-                            line1.append_comment(comment.clone());
+                            line1.append_comment(comment);
                         }
                     }
 
                     new_lines.push(line1);
                     new_lines.push(line2);
                 } else {
-                    new_lines.push(line.clone());
+                    new_lines.push(line);
                 }
             } else {
-                new_lines.push(line.clone());
+                new_lines.push(line);
             }
         }
         query.lines = new_lines;
@@ -194,8 +184,6 @@ impl QueryFormatter {
     /// Stage 3: Adjust indentation of Jinja block start/end to match
     /// the least-indented content inside the block.
     fn dedent_jinja_blocks(&self, query: &mut Query, arena: &mut [Node]) {
-        // Jinja block dedenting: scan for jinja blocks and adjust the depth
-        // of the block start/end lines to match the minimum depth inside.
         let lines = &mut query.lines;
         if lines.is_empty() {
             return;
@@ -203,7 +191,6 @@ impl QueryFormatter {
 
         let mut i = 0;
         while i < lines.len() {
-            // Check if this line starts with a jinja block start
             let is_block_start = lines[i]
                 .first_content_node(arena)
                 .map(|n| {
@@ -240,15 +227,12 @@ impl QueryFormatter {
                     j += 1;
                 }
 
-                // Apply dedent: adjust block start/end nodes to min_depth
                 if min_sql_depth < usize::MAX && min_sql_depth < start_depth.0 {
-                    // Adjust block start line
                     if let Some(node_idx) = lines[i].first_content_node_idx(arena) {
                         while arena[node_idx].open_brackets.len() > min_sql_depth {
                             arena[node_idx].open_brackets.pop();
                         }
                     }
-                    // Adjust block end line
                     if let Some(ej) = end_j {
                         if let Some(node_idx) = lines[ej].first_content_node_idx(arena) {
                             while arena[node_idx].open_brackets.len() > min_sql_depth {
@@ -274,36 +258,35 @@ impl QueryFormatter {
     /// Also removes blank lines immediately after standalone comment lines
     /// (Python sqlfmt hoists comments to attach directly to the next statement).
     fn remove_extra_blank_lines(&self, query: &mut Query, arena: &[Node]) {
-        let mut new_lines: Vec<Line> = Vec::new();
+        let old_lines = std::mem::take(&mut query.lines);
+        let mut new_lines: Vec<Line> = Vec::with_capacity(old_lines.len());
         let mut consecutive_blanks = 0;
         let mut after_standalone_comment = false;
 
-        for line in &query.lines {
+        for line in old_lines {
             if line.is_blank_line(arena) {
                 if after_standalone_comment && !line.has_formatting_disabled() {
-                    // Skip blank lines immediately after standalone comment lines
                     continue;
                 }
                 // Preserve blank lines in formatting-disabled regions
                 if line.has_formatting_disabled() {
                     consecutive_blanks = 0;
-                    new_lines.push(line.clone());
+                    new_lines.push(line);
                 } else {
                     consecutive_blanks += 1;
                     let depth = line.depth(arena);
                     let max_blanks = if depth == (0, 0) { 2 } else { 1 };
                     if consecutive_blanks <= max_blanks {
-                        new_lines.push(line.clone());
+                        new_lines.push(line);
                     }
                 }
             } else {
                 consecutive_blanks = 0;
                 after_standalone_comment = line.is_standalone_comment_line(arena);
-                new_lines.push(line.clone());
+                new_lines.push(line);
             }
         }
 
-        // Remove trailing blank lines
         while new_lines
             .last()
             .map(|l| l.is_blank_line(arena))

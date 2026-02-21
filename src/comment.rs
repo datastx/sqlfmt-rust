@@ -40,10 +40,8 @@ impl Comment {
     /// Return the comment marker (e.g., "--", "/*", "{#-").
     pub fn marker(&self) -> &str {
         let text = &self.token.token;
-        // Try markers from longest to shortest
         for marker in COMMENT_MARKERS {
             if text.starts_with(marker) {
-                // Check for Jinja comment with whitespace control
                 if *marker == "{#" && text.len() > 2 && text.as_bytes()[2] == b'-' {
                     return &text[..3];
                 }
@@ -86,7 +84,6 @@ impl Comment {
     /// Render as standalone comment on its own line(s).
     pub fn render_standalone(&self, prefix: &str, max_line_length: usize) -> String {
         if self.is_multiline() || self.is_c_style() || self.is_jinja_comment() {
-            // Preserve multiline / C-style / Jinja comments as-is with proper prefix
             return format!("{}{}\n", prefix, self.token.token.trim());
         }
 
@@ -97,7 +94,6 @@ impl Comment {
             return format!("{}{}\n", prefix, marker);
         }
 
-        // Compute available width for comment text
         let overhead = prefix.len() + marker.len() + 1; // +1 for space after marker
         let max_text_width = if max_line_length > overhead {
             max_line_length - overhead
@@ -116,7 +112,6 @@ impl Comment {
             return format!("{}{} {}\n", prefix, marker, body);
         }
 
-        // Wrap long comment text at word boundaries
         let mut result = String::new();
         let mut current_line = String::new();
         for word in body.split_whitespace() {

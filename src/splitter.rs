@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::comment::Comment;
 use crate::line::Line;
 use crate::node::{Node, NodeIndex};
@@ -11,15 +13,11 @@ use crate::token::{Token, TokenType};
 /// - Splits AFTER commas, opening brackets, keywords, query dividers
 /// - Splits BEFORE operators, keywords, closing brackets, multiline jinja
 /// - Uses iterative (not recursive) approach to handle very long lines
-pub struct LineSplitter {
-    _max_length: usize,
-}
+pub struct LineSplitter;
 
 impl LineSplitter {
-    pub fn new(max_length: usize) -> Self {
-        Self {
-            _max_length: max_length,
-        }
+    pub fn new(_max_length: usize) -> Self {
+        Self
     }
 
     /// Split a single line into multiple lines based on SQL structure.
@@ -66,7 +64,6 @@ impl LineSplitter {
             never_split_after = no_split_after;
         }
 
-        // Handle remaining nodes (no newline at end)
         let (new_line, _remaining_comments) =
             self.split_at_index(line, head, line.nodes.len(), &comments, true, arena);
         new_lines.push(new_line);
@@ -85,11 +82,9 @@ impl LineSplitter {
         // split from preceding content (e.g., `= {{ ... }}` or `on {{ ... }}`).
         // Note: the operator/keyword split rules below will still break lines
         // at operators and keywords that precede multiline Jinja.
-        // Split before any unterm keyword
         if node.is_unterm_keyword() {
             return true;
         }
-        // Split before any opening jinja block
         if node.is_opening_jinja_block() {
             return true;
         }
@@ -104,8 +99,7 @@ impl LineSplitter {
             }
             return true;
         }
-        // Split before boolean operators (and, or, not) — same as regular operators
-        // but NOT the AND after BETWEEN, and NOT "not" after "or"/"and"
+        // NOT the AND after BETWEEN, and NOT "not" after "or"/"and"
         if node.is_boolean_operator() {
             if node.is_the_and_after_between(arena) {
                 return false;
@@ -128,16 +122,13 @@ impl LineSplitter {
             }
             return true;
         }
-        // Split before closing jinja blocks
         if node.is_closing_jinja_block() {
             return true;
         }
-        // Split before query dividers (semicolon, set operators)
         if node.divides_queries() {
             return true;
         }
-        // Split if opening bracket follows closing bracket
-        // (e.g., split(my_field)[offset(1)])
+        // e.g., split(my_field)[offset(1)]
         if self.maybe_split_between_brackets(node_idx, arena) {
             return true;
         }
@@ -152,12 +143,10 @@ impl LineSplitter {
             return false;
         }
         if let Some(prev_idx) = node.previous_node {
-            // Walk back past newlines/jinja to find prev SQL token
             let prev = &arena[prev_idx];
             if prev.is_closing_bracket() {
                 return true;
             }
-            // Also check via get_previous_sql_token
             if let Some(prev_token) = node.get_previous_sql_token(arena) {
                 if prev_token.token_type.is_closing_bracket() {
                     return true;
@@ -171,20 +160,17 @@ impl LineSplitter {
     fn maybe_split_after(&self, node_idx: NodeIndex, arena: &[Node]) -> (bool, bool) {
         let node = &arena[node_idx];
 
-        // Always split after commas
         if node.is_comma() {
             return (true, false);
         }
-        // Always split after opening brackets — but NOT after angle brackets
-        // (< for type constructors like array<int64>). Angle bracket content
-        // is typically short and should stay on the same line as the type keyword.
+        // BUT NOT after angle brackets (< for type constructors like array<int64>).
+        // Angle bracket content is typically short and should stay on the same line.
         if node.is_opening_bracket() {
             if node.value == "<" {
                 return (false, false);
             }
             return (true, false);
         }
-        // Always split after opening jinja blocks ({% if %}, {% for %}).
         // But for JinjaBlockKeyword ({% else %}, {% elif %}), don't force
         // split after — let the following content stay on the same line so
         // the merger can decide (e.g., {% else %} {{ config() }}).
@@ -194,11 +180,9 @@ impl LineSplitter {
             }
             return (true, false);
         }
-        // Always split after unterm keywords — but not after LATERAL when
-        // followed by ( (it should stay as "lateral(" like a function call)
+        // not after LATERAL when followed by ( (it should stay as "lateral(" like a function call)
         if node.is_unterm_keyword() {
             if node.value.eq_ignore_ascii_case("lateral") {
-                // Check if next node in the arena is an opening bracket
                 let next_idx = node_idx + 1;
                 if next_idx < arena.len() && arena[next_idx].is_opening_bracket() {
                     return (false, false);
@@ -206,11 +190,9 @@ impl LineSplitter {
             }
             return (true, false);
         }
-        // Always split after query dividers
         if node.divides_queries() {
             return (true, false);
         }
-        // Never split after formatting-disabled nodes
         if !node.formatting_disabled.is_empty() {
             return (false, true);
         }
@@ -240,7 +222,6 @@ impl LineSplitter {
             return (empty_line, comments.to_vec());
         }
 
-        // Determine comment distribution
         // - Inline comments stay with the line containing their previous_node
         // - Standalone comments go to the NEXT line (they describe what follows)
         // - Orphaned comments (previous_node from an earlier split) attach to current head
@@ -249,29 +230,28 @@ impl LineSplitter {
         } else if comments.is_empty() {
             (Vec::new(), Vec::new())
         } else if new_nodes.len() == 1 && arena[new_nodes[0]].token.token_type == TokenType::Comma {
-            // If head is just a comma, pass all comments to tail
             (Vec::new(), comments.to_vec())
         } else {
-            let remaining_nodes: Vec<NodeIndex> = if index < line.nodes.len() {
-                line.nodes[index..].to_vec()
+            let head_set: HashSet<NodeIndex> = new_nodes.iter().copied().collect();
+            let remaining_set: HashSet<NodeIndex> = if index < line.nodes.len() {
+                line.nodes[index..].iter().copied().collect()
             } else {
-                Vec::new()
+                HashSet::new()
             };
             let mut head_c = Vec::new();
             let mut tail_c = Vec::new();
             for comment in comments {
                 let prev_in_head = comment
                     .previous_node
-                    .is_some_and(|prev_idx| new_nodes.contains(&prev_idx));
+                    .is_some_and(|prev_idx| head_set.contains(&prev_idx));
                 let prev_in_remaining = comment
                     .previous_node
-                    .is_some_and(|prev_idx| remaining_nodes.contains(&prev_idx));
+                    .is_some_and(|prev_idx| remaining_set.contains(&prev_idx));
 
                 if prev_in_head {
                     if comment.is_inline() {
                         head_c.push(comment.clone());
                     } else {
-                        // Standalone comment after a head node → goes to next line
                         tail_c.push(comment.clone());
                     }
                 } else if prev_in_remaining {
@@ -284,7 +264,6 @@ impl LineSplitter {
             (head_c, tail_c)
         };
 
-        // Build the new line
         let prev = if !new_nodes.is_empty() {
             arena[new_nodes[0]].previous_node
         } else {
@@ -296,9 +275,10 @@ impl LineSplitter {
         }
         new_line.comments = head_comments;
 
-        // Ensure line ends with a newline node
-        if !new_nodes.is_empty() && !arena[*new_nodes.last().unwrap()].is_newline() {
-            self.append_newline(&mut new_line, arena);
+        if let Some(&last_node) = new_nodes.last() {
+            if !arena[last_node].is_newline() {
+                self.append_newline(&mut new_line, arena);
+            }
         }
 
         (new_line, tail_comments)
@@ -381,7 +361,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should split: select a \n, from \n, t \n
         assert!(
             result.len() >= 2,
             "Expected at least 2 lines, got {}",
@@ -402,7 +381,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should split after comma: "a," and "b"
         assert!(
             result.len() >= 2,
             "Expected at least 2 lines, got {}",
@@ -423,7 +401,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should split before operator: "a" and "+ b"
         assert!(
             result.len() >= 2,
             "Expected split before operator, got {} lines",
@@ -444,7 +421,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should split: "(" then "x" then ")"
         assert!(
             result.len() >= 2,
             "Expected split at brackets, got {} lines",
@@ -486,7 +462,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should split after "(": "count(" then "*" then ")"
         assert!(
             result.len() >= 2,
             "Expected split after open bracket, got {} lines",
@@ -496,7 +471,6 @@ mod tests {
 
     #[test]
     fn test_no_split_bracket_operator() {
-        // Array indexing: arr[0] - should NOT split before [
         let mut arena = Vec::new();
         let arr = make_node(&mut arena, TokenType::Name, "arr", "");
         let bracket = make_node(&mut arena, TokenType::BracketOpen, "[", "");
@@ -524,13 +498,10 @@ mod tests {
 
         let mut line = Line::new(None);
         line.nodes = vec![a, op, b, nl];
-        // Mark as formatting disabled
-        line.formatting_disabled
-            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+        line.formatting_disabled.push(0);
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Should return line unchanged
         assert_eq!(result.len(), 1);
     }
 
@@ -547,7 +518,6 @@ mod tests {
 
         let splitter = LineSplitter::new(88);
         let result = splitter.maybe_split(&line, &mut arena);
-        // Set operator divides queries, should split
         assert!(
             result.len() >= 2,
             "Expected split at set operator, got {} lines",

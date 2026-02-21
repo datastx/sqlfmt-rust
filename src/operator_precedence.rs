@@ -40,7 +40,7 @@ impl OperatorPrecedence {
     /// Determine precedence from a Node.
     pub fn from_node(node: &Node, arena: &[Node]) -> Self {
         match node.token.token_type {
-            TokenType::DoublColon => Self::DoubleColon,
+            TokenType::DoubleColon => Self::DoubleColon,
             TokenType::On => Self::On,
             TokenType::BooleanOperator => {
                 let lower = node.value.to_ascii_lowercase();
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_double_colon_precedence() {
-        let node = make_node(TokenType::DoublColon, "::");
+        let node = make_node(TokenType::DoubleColon, "::");
         let arena = vec![];
         assert_eq!(
             OperatorPrecedence::from_node(&node, &arena),
