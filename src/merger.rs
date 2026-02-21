@@ -36,7 +36,8 @@ impl LineMerger {
 
                 if segments.len() > 1 {
                     let segments = self.fix_standalone_operators(segments, arena);
-                    let segments = self.maybe_merge_operators(segments, OperatorPrecedence::tiers(), arena);
+                    let segments =
+                        self.maybe_merge_operators(segments, OperatorPrecedence::tiers(), arena);
                     let segments = self.maybe_stubbornly_merge(segments, arena);
                     for segment in &segments {
                         merged_lines.extend(self.maybe_merge_lines(&segment.lines, arena));
