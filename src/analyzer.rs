@@ -53,12 +53,10 @@ impl Analyzer {
 
     /// Main entry point: parse source string into a Query.
     pub fn parse_query(&mut self, source: &str) -> Result<Query, SqlfmtError> {
-        // Pre-lex validation: check for unmatched comment markers
         Self::validate_comment_markers(source)?;
         self.clear_buffers();
         self.lex(source)?;
         self.flush_line_buffer();
-        // Post-lex validation: check for unmatched brackets
         self.validate_brackets()?;
         Ok(self.build_query(source))
     }
@@ -81,33 +79,35 @@ impl Analyzer {
             return Ok(());
         }
 
-        // Phase 1: Find matching rule (immutable borrow of rule_stack)
+        // Captures borrow from `remaining` (which borrows from `source`, not `self`),
+        // so &str slices can safely cross the borrow boundary into execute_action.
+        // This avoids 3 String allocations per token (.to_string() on each capture).
         let match_result = {
-            let rules = self.rule_stack.last().unwrap();
+            let rules = self
+                .rule_stack
+                .last()
+                .expect("rule_stack initialized with main rules in Analyzer::new");
             let mut found = None;
             for rule in rules {
                 if let Some(captures) = rule.pattern.captures(remaining) {
-                    let full_match_str = captures.get(0).unwrap().as_str().to_string();
-                    let prefix = captures
-                        .get(1)
-                        .map(|m| m.as_str().to_string())
-                        .unwrap_or_default();
-                    let token_text = captures
-                        .get(2)
-                        .map(|m| m.as_str().to_string())
-                        .unwrap_or_default();
+                    let match_len = captures
+                        .get(0)
+                        .expect("regex group 0 always exists on match")
+                        .as_str()
+                        .len();
+                    let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+                    let token_text = captures.get(2).map(|m| m.as_str()).unwrap_or("");
                     let action = rule.action.clone();
-                    found = Some((full_match_str, prefix, token_text, action));
+                    found = Some((match_len, prefix, token_text, action));
                     break;
                 }
             }
             found
         };
 
-        // Phase 2: Execute the action (mutable borrow of self)
         match match_result {
-            Some((full_match_str, prefix, token_text, action)) => {
-                self.execute_action(&action, &full_match_str, &prefix, &token_text, source)
+            Some((match_len, prefix, token_text, action)) => {
+                self.execute_action(&action, match_len, prefix, token_text, source)
             }
             None => Err(SqlfmtError::Parsing {
                 position: self.pos,
@@ -123,42 +123,20 @@ impl Analyzer {
     fn execute_action(
         &mut self,
         action: &Action,
-        full_match_str: &str,
+        match_len: usize,
         prefix: &str,
         token_text: &str,
         _source: &str,
     ) -> Result<(), SqlfmtError> {
-        let match_len = full_match_str.len();
-
         match action {
             Action::AddNode { token_type } => {
-                // Special case: >> inside angle brackets should be two closing brackets
-                if *token_type == TokenType::Operator && token_text == ">>" {
-                    let open_angle_count = self
-                        .node_manager
-                        .open_brackets
-                        .iter()
-                        .filter(|&&idx| self.arena[idx].value == "<")
-                        .count();
-                    if open_angle_count >= 2 {
-                        // Split >> into two > BracketClose tokens
-                        self.add_node(prefix, ">", TokenType::BracketClose);
-                        self.node_manager.open_brackets.pop();
-                        self.add_node("", ">", TokenType::BracketClose);
-                        self.node_manager.open_brackets.pop();
-                        self.pos += match_len;
-                        return Ok(());
-                    } else if open_angle_count == 1 {
-                        // First > closes bracket, second > is operator
-                        self.add_node(prefix, ">", TokenType::BracketClose);
-                        self.node_manager.open_brackets.pop();
-                        self.add_node("", ">", TokenType::Operator);
-                        self.pos += match_len;
-                        return Ok(());
-                    }
+                if *token_type == TokenType::Operator
+                    && token_text == ">>"
+                    && self.handle_angle_bracket_splitting(prefix, match_len)
+                {
+                    return Ok(());
                 }
                 self.add_node(prefix, token_text, *token_type);
-                // Switch rule sets on fmt:off/on
                 if *token_type == TokenType::FmtOff {
                     self.push_rules(crate::rules::fmt_off_rules());
                 } else if *token_type == TokenType::FmtOn {
@@ -171,36 +149,7 @@ impl Analyzer {
                 token_type,
                 alt_token_type,
             } => {
-                // Try primary type; fall back to alt_token_type on mismatch
-                if *token_type == TokenType::BracketOpen && token_text.contains('<') {
-                    // Handle "array<", "struct<", "map<" — split into name + bracket
-                    let angle_pos = token_text.find('<').unwrap();
-                    let name_part = &token_text[..angle_pos].trim();
-                    let bracket_part = "<";
-                    if !name_part.is_empty() {
-                        self.add_node(prefix, name_part, TokenType::Name);
-                    }
-                    self.add_node("", bracket_part, TokenType::BracketOpen);
-                    let last_idx = self.arena.len() - 1;
-                    self.node_manager.push_bracket(last_idx);
-                } else if *token_type == TokenType::StatementEnd {
-                    // END: check if there is a matching CASE (StatementStart) in open brackets
-                    let has_matching_case =
-                        self.node_manager.open_brackets.iter().any(|&idx| {
-                            self.arena[idx].token.token_type == TokenType::StatementStart
-                        });
-                    if has_matching_case {
-                        self.add_node(prefix, token_text, TokenType::StatementEnd);
-                    } else {
-                        self.add_node(prefix, token_text, *alt_token_type);
-                    }
-                } else {
-                    self.add_node(prefix, token_text, *token_type);
-                    if token_type.is_opening_bracket() {
-                        let last_idx = self.arena.len() - 1;
-                        self.node_manager.push_bracket(last_idx);
-                    }
-                }
+                self.handle_safe_add_node(prefix, token_text, *token_type, *alt_token_type);
                 self.pos += match_len;
             }
 
@@ -221,7 +170,8 @@ impl Analyzer {
                 } else {
                     // Store trailing whitespace from this newline match
                     // (prefix captures whitespace between last token and newline)
-                    self.trailing_whitespace = prefix.to_string();
+                    self.trailing_whitespace.clear();
+                    self.trailing_whitespace.push_str(prefix);
                     self.flush_line_buffer();
                     self.trailing_whitespace.clear();
                 }
@@ -231,7 +181,6 @@ impl Analyzer {
             Action::HandleSemicolon => {
                 self.add_node(prefix, token_text, TokenType::Semicolon);
                 self.flush_line_buffer();
-                // Reset rule stack to base
                 while self.rule_stack.len() > 1 {
                     self.rule_stack.pop();
                 }
@@ -241,34 +190,28 @@ impl Analyzer {
             }
 
             Action::HandleNumber => {
-                // Check if preceded by a unary +/- operator
-                // If the previous token is +/- and before that is an operator/keyword/comma,
-                // then the +/- is unary and should be part of the number
                 self.add_node(prefix, token_text, TokenType::Number);
                 self.pos += match_len;
             }
 
             Action::HandleReservedKeyword { inner } => {
-                // If preceded by DOT, treat as a NAME instead
-                let prev_is_dot = self.previous_node_index().is_some_and(|_idx| {
-                    // Check if the *direct* prev node (skipping newlines) is DOT
-                    self.get_prev_sql_type() == Some(TokenType::Dot)
-                });
+                let prev_is_dot = self
+                    .previous_node_index()
+                    .is_some_and(|_idx| self.get_prev_sql_type() == Some(TokenType::Dot));
                 if prev_is_dot {
                     self.add_node(prefix, token_text, TokenType::Name);
                     self.pos += match_len;
                 } else {
-                    self.execute_action(inner, full_match_str, prefix, token_text, _source)?;
+                    self.execute_action(inner, match_len, prefix, token_text, _source)?;
                 }
             }
 
             Action::HandleNonreservedTopLevelKeyword { inner } => {
-                // If inside brackets, treat as NAME
                 if !self.node_manager.open_brackets.is_empty() {
                     self.add_node(prefix, token_text, TokenType::Name);
                     self.pos += match_len;
                 } else {
-                    self.execute_action(inner, full_match_str, prefix, token_text, _source)?;
+                    self.execute_action(inner, match_len, prefix, token_text, _source)?;
                 }
             }
 
@@ -286,50 +229,12 @@ impl Analyzer {
             }
 
             Action::HandleDdlAs => {
-                // In CREATE FUNCTION, AS is an UntermKeyword.
-                // If the next meaningful token is NOT a quoted name/string,
-                // pop the current ruleset to switch back to MAIN rules
-                // so the function body gets proper SQL formatting.
                 self.add_node(prefix, token_text, TokenType::UntermKeyword);
                 self.pos += match_len;
-
-                // Check if the next non-whitespace, non-comment text starts
-                // with a quote character (string literal or quoted name)
-                let remaining = &_source[self.pos..];
-                let trimmed = remaining.trim_start();
-                // Skip comments
-                let mut check = trimmed;
-                loop {
-                    if check.starts_with("--") || check.starts_with("//") || check.starts_with('#')
-                    {
-                        // Skip to end of line
-                        if let Some(nl) = check.find('\n') {
-                            check = check[nl + 1..].trim_start();
-                        } else {
-                            break;
-                        }
-                    } else if check.starts_with("/*") {
-                        if let Some(end) = check.find("*/") {
-                            check = check[end + 2..].trim_start();
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                let next_is_quoted = check.starts_with('\'')
-                    || check.starts_with('"')
-                    || check.starts_with('`')
-                    || check.starts_with("$$");
-                if !next_is_quoted {
-                    // Pop back to main rules for the function body
-                    self.pop_rules();
-                }
+                self.handle_ddl_as(_source);
             }
 
             Action::HandleClosingAngleBracket => {
-                // Check if we have an open angle bracket to close
                 let has_open_angle = self
                     .node_manager
                     .open_brackets
@@ -349,18 +254,7 @@ impl Analyzer {
                 self.add_node(prefix, token_text, TokenType::JinjaBlockStart);
                 let last_idx = self.arena.len() - 1;
                 self.node_manager.push_jinja_block(last_idx);
-                // Determine if this block should switch to data rules
-                let lower = token_text.to_lowercase();
-                let stripped = lower.trim_start_matches(|c: char| {
-                    c == '{' || c == '%' || c == '-' || c.is_whitespace()
-                });
-                if stripped.starts_with("call") && !stripped.starts_with("call statement") {
-                    // {% call foo() %} blocks: treat content as data
-                    self.push_rules(crate::rules::jinja_call_block_rules());
-                } else if stripped.starts_with("set") && !lower.contains('=') {
-                    // {% set x %} blocks (without =): treat content as data
-                    self.push_rules(crate::rules::jinja_set_block_rules());
-                }
+                self.maybe_push_jinja_data_rules(token_text);
                 self.pos += match_len;
             }
 
@@ -374,7 +268,6 @@ impl Analyzer {
                     .open_jinja_blocks
                     .last()
                     .and_then(|&idx| self.arena[idx].previous_node);
-                // Pop current jinja block, add keyword, push new block
                 self.node_manager.pop_jinja_block();
                 self.add_node(prefix, token_text, TokenType::JinjaBlockKeyword);
                 let last_idx = self.arena.len() - 1;
@@ -390,7 +283,6 @@ impl Analyzer {
             }
 
             Action::HandleJinjaBlockEnd => {
-                // Pop data block rules if we were inside a set or call block
                 let lower = token_text.to_lowercase();
                 if (lower.contains("endset") || lower.contains("endcall"))
                     && self.rule_stack.len() > 1
@@ -403,24 +295,7 @@ impl Analyzer {
             }
 
             Action::HandleJinja { token_type } => {
-                if *token_type == TokenType::JinjaExpression {
-                    // Use depth-aware scanning for {{ }} to handle nested {{ }}
-                    let remaining = &_source[self.pos..];
-                    let prefix_len = prefix.len();
-                    let tag_start = &remaining[prefix_len..];
-                    if let Some(tag_len) = Self::find_jinja_expr_end(tag_start) {
-                        let full_text = &tag_start[..tag_len];
-                        self.add_node(prefix, full_text, *token_type);
-                        self.pos += prefix_len + tag_len;
-                    } else {
-                        // Fallback: use regex match
-                        self.add_node(prefix, token_text, *token_type);
-                        self.pos += match_len;
-                    }
-                } else {
-                    self.add_node(prefix, token_text, *token_type);
-                    self.pos += match_len;
-                }
+                self.handle_jinja(prefix, token_text, *token_type, _source, match_len);
             }
 
             Action::HandleKeywordBeforeParen { token_type } => {
@@ -463,6 +338,137 @@ impl Analyzer {
         Ok(())
     }
 
+    /// Handle `>>` inside angle brackets by splitting into two `>` tokens.
+    /// Returns `true` if the split was handled (caller should return early).
+    fn handle_angle_bracket_splitting(&mut self, prefix: &str, match_len: usize) -> bool {
+        let open_angle_count = self
+            .node_manager
+            .open_brackets
+            .iter()
+            .filter(|&&idx| self.arena[idx].value == "<")
+            .count();
+        if open_angle_count >= 2 {
+            self.add_node(prefix, ">", TokenType::BracketClose);
+            self.node_manager.open_brackets.pop();
+            self.add_node("", ">", TokenType::BracketClose);
+            self.node_manager.open_brackets.pop();
+            self.pos += match_len;
+            return true;
+        }
+        if open_angle_count == 1 {
+            self.add_node(prefix, ">", TokenType::BracketClose);
+            self.node_manager.open_brackets.pop();
+            self.add_node("", ">", TokenType::Operator);
+            self.pos += match_len;
+            return true;
+        }
+        false
+    }
+
+    /// Handle SafeAddNode: try primary type, fall back to alt on mismatch.
+    fn handle_safe_add_node(
+        &mut self,
+        prefix: &str,
+        token_text: &str,
+        token_type: TokenType,
+        alt_token_type: TokenType,
+    ) {
+        if token_type == TokenType::BracketOpen && token_text.contains('<') {
+            let angle_pos = token_text.find('<').expect("contains('<') checked above");
+            let name_part = &token_text[..angle_pos].trim();
+            if !name_part.is_empty() {
+                self.add_node(prefix, name_part, TokenType::Name);
+            }
+            self.add_node("", "<", TokenType::BracketOpen);
+            let last_idx = self.arena.len() - 1;
+            self.node_manager.push_bracket(last_idx);
+        } else if token_type == TokenType::StatementEnd {
+            let has_matching_case = self
+                .node_manager
+                .open_brackets
+                .iter()
+                .any(|&idx| self.arena[idx].token.token_type == TokenType::StatementStart);
+            if has_matching_case {
+                self.add_node(prefix, token_text, TokenType::StatementEnd);
+            } else {
+                self.add_node(prefix, token_text, alt_token_type);
+            }
+        } else {
+            self.add_node(prefix, token_text, token_type);
+            if token_type.is_opening_bracket() {
+                let last_idx = self.arena.len() - 1;
+                self.node_manager.push_bracket(last_idx);
+            }
+        }
+    }
+
+    /// After adding DDL AS keyword, check if the function body should use
+    /// main rules (when the next token is not a quoted string).
+    fn handle_ddl_as(&mut self, source: &str) {
+        let remaining = &source[self.pos..];
+        let mut check = remaining.trim_start();
+        loop {
+            if check.starts_with("--") || check.starts_with("//") || check.starts_with('#') {
+                if let Some(nl) = check.find('\n') {
+                    check = check[nl + 1..].trim_start();
+                } else {
+                    break;
+                }
+            } else if check.starts_with("/*") {
+                if let Some(end) = check.find("*/") {
+                    check = check[end + 2..].trim_start();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        let next_is_quoted = check.starts_with('\'')
+            || check.starts_with('"')
+            || check.starts_with('`')
+            || check.starts_with("$$");
+        if !next_is_quoted {
+            self.pop_rules();
+        }
+    }
+
+    /// Push data-mode rules for {% call %} and {% set %} blocks.
+    fn maybe_push_jinja_data_rules(&mut self, token_text: &str) {
+        let lower = token_text.to_lowercase();
+        let stripped = lower
+            .trim_start_matches(|c: char| c == '{' || c == '%' || c == '-' || c.is_whitespace());
+        if stripped.starts_with("call") && !stripped.starts_with("call statement") {
+            self.push_rules(crate::rules::jinja_call_block_rules());
+        } else if stripped.starts_with("set") && !lower.contains('=') {
+            self.push_rules(crate::rules::jinja_set_block_rules());
+        }
+    }
+
+    /// Handle Jinja expressions with depth-aware scanning for nested `{{ }}`.
+    fn handle_jinja(
+        &mut self,
+        prefix: &str,
+        token_text: &str,
+        token_type: TokenType,
+        source: &str,
+        match_len: usize,
+    ) {
+        if token_type == TokenType::JinjaExpression {
+            let remaining = &source[self.pos..];
+            let prefix_len = prefix.len();
+            let tag_start = &remaining[prefix_len..];
+            if let Some(tag_len) = Self::find_jinja_expr_end(tag_start) {
+                let full_text = &tag_start[..tag_len];
+                self.add_node(prefix, full_text, token_type);
+                self.pos += prefix_len + tag_len;
+                return;
+            }
+        }
+        self.add_node(prefix, token_text, token_type);
+        self.pos += match_len;
+    }
+
     /// Add a node to the node buffer.
     fn add_node(&mut self, prefix: &str, token_text: &str, token_type: TokenType) {
         let spos = self.pos;
@@ -474,7 +480,6 @@ impl Analyzer {
         let idx = self.arena.len();
         self.arena.push(node);
 
-        // Track opening brackets
         if token_type.is_opening_bracket()
             && !matches!(token_type, TokenType::BracketOpen if token_text.contains('<'))
         {
@@ -490,75 +495,82 @@ impl Analyzer {
         let epos = spos + token_text.len();
         let token = Token::new(TokenType::Comment, "", token_text, spos, epos);
         let is_standalone = self.node_buffer.is_empty();
-        // If the last node in the buffer is a semicolon, attach the comment
-        // to the node before the semicolon. This ensures inline comments after
-        // semicolons (e.g., `from table; -- comment`) stay with the preceding
-        // content line when the semicolon is split to its own line.
-        let prev = if !is_standalone {
-            if let Some(&last_idx) = self.node_buffer.last() {
-                if self.arena[last_idx].token.token_type == TokenType::Semicolon {
-                    if self.node_buffer.len() >= 2 {
-                        Some(self.node_buffer[self.node_buffer.len() - 2])
-                    } else {
-                        self.previous_node_index()
-                    }
-                } else {
-                    self.previous_node_index()
-                }
-            } else {
-                self.previous_node_index()
-            }
-        } else {
-            self.previous_node_index()
-        };
+        let prev = self.comment_prev_node(is_standalone);
 
-        // When the buffer is empty but the last flushed line ends with a semicolon
-        // AND the comment is on the SAME LINE (no newline in token prefix),
-        // the comment is inline after that semicolon (e.g., `from table; -- comment`).
-        // Attach it directly to the previous line instead of buffering it as standalone.
-        if is_standalone && !self.line_buffer.is_empty() && !token_text.is_empty() {
-            // Check if the comment is on the same line as the semicolon
-            // by examining the original prefix (text between semicolon and comment).
-            // Also check had_suppressed_newline: when a newline after a semicolon
-            // was suppressed (to prevent blank lines), the prefix won't contain '\n'
-            // even though the comment IS on a different line.
-            let same_line =
-                !_prefix.contains('\n') && !_prefix.is_empty() && !self.had_suppressed_newline;
-            if same_line {
-                let last_line = self.line_buffer.last().unwrap();
-                // Check if the last content node in the previous line is a semicolon
-                let has_trailing_semicolon = last_line.nodes.iter().rev().any(|&idx| {
-                    let node = &self.arena[idx];
-                    if node.is_newline() {
-                        false
-                    } else {
-                        node.token.token_type == TokenType::Semicolon
-                    }
-                });
-                if has_trailing_semicolon {
-                    let content_nodes: Vec<usize> = last_line
-                        .nodes
-                        .iter()
-                        .copied()
-                        .filter(|&idx| !self.arena[idx].is_newline())
-                        .collect();
-                    let attach_to = if content_nodes.len() >= 2 {
-                        Some(content_nodes[content_nodes.len() - 2])
-                    } else if !content_nodes.is_empty() {
-                        Some(content_nodes[0])
-                    } else {
-                        prev
-                    };
-                    let comment = Comment::new(token, false, attach_to);
-                    self.line_buffer.last_mut().unwrap().append_comment(comment);
-                    return;
-                }
-            }
+        if self.try_attach_inline_comment_to_semicolon_line(&token, _prefix, is_standalone, prev) {
+            return;
         }
 
         self.had_suppressed_newline = false;
         let comment = Comment::new(token, is_standalone, prev);
         self.comment_buffer.push(comment);
+    }
+
+    /// Determine the previous node for a comment. When the last buffered node
+    /// is a semicolon, attach to the node before it so the comment stays with
+    /// the preceding content when the semicolon is split to its own line.
+    fn comment_prev_node(&self, is_standalone: bool) -> Option<NodeIndex> {
+        if is_standalone {
+            return self.previous_node_index();
+        }
+        let Some(&last_idx) = self.node_buffer.last() else {
+            return self.previous_node_index();
+        };
+        if self.arena[last_idx].token.token_type == TokenType::Semicolon
+            && self.node_buffer.len() >= 2
+        {
+            Some(self.node_buffer[self.node_buffer.len() - 2])
+        } else {
+            self.previous_node_index()
+        }
+    }
+
+    /// When the buffer is empty but the last flushed line ends with a semicolon
+    /// and the comment is on the same line, attach it as an inline comment
+    /// on that line. Returns true if the comment was attached.
+    fn try_attach_inline_comment_to_semicolon_line(
+        &mut self,
+        token: &Token,
+        prefix: &str,
+        is_standalone: bool,
+        prev: Option<NodeIndex>,
+    ) -> bool {
+        if !is_standalone || self.line_buffer.is_empty() || token.token.is_empty() {
+            return false;
+        }
+        let same_line =
+            !prefix.contains('\n') && !prefix.is_empty() && !self.had_suppressed_newline;
+        if !same_line {
+            return false;
+        }
+        let Some(last_line) = self.line_buffer.last() else {
+            return false;
+        };
+        let has_trailing_semicolon = last_line.nodes.iter().rev().any(|&idx| {
+            let node = &self.arena[idx];
+            !node.is_newline() && node.token.token_type == TokenType::Semicolon
+        });
+        if !has_trailing_semicolon {
+            return false;
+        }
+        let content_nodes: Vec<usize> = last_line
+            .nodes
+            .iter()
+            .copied()
+            .filter(|&idx| !self.arena[idx].is_newline())
+            .collect();
+        let attach_to = if content_nodes.len() >= 2 {
+            Some(content_nodes[content_nodes.len() - 2])
+        } else if !content_nodes.is_empty() {
+            Some(content_nodes[0])
+        } else {
+            prev
+        };
+        let comment = Comment::new(token.clone(), false, attach_to);
+        if let Some(last_line) = self.line_buffer.last_mut() {
+            last_line.append_comment(comment);
+        }
+        true
     }
 
     /// Flush node and comment buffers into a Line, append to line_buffer.
@@ -581,7 +593,6 @@ impl Analyzer {
 
             let mut line = Line::new(prev);
             line.append_node(idx);
-            // Propagate formatting_disabled from newline node
             if !self.arena[idx].formatting_disabled.is_empty() {
                 line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
             }
@@ -597,12 +608,10 @@ impl Analyzer {
 
         let mut line = Line::new(prev);
 
-        // Add all buffered nodes
         for &idx in &self.node_buffer {
             line.append_node(idx);
         }
 
-        // Propagate formatting_disabled from first content node with it set
         for &idx in &self.node_buffer {
             if !self.arena[idx].formatting_disabled.is_empty() {
                 line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
@@ -630,7 +639,6 @@ impl Analyzer {
         self.arena.push(nl_node);
         line.append_node(nl_idx);
 
-        // Add all buffered comments
         for comment in self.comment_buffer.drain(..) {
             line.append_comment(comment);
         }
@@ -694,14 +702,12 @@ impl Analyzer {
         }
 
         let mut i = 2;
-        // Skip optional `-` (for {{-)
         if i < len && bytes[i] == b'-' {
             i += 1;
         }
 
         let mut depth = 1;
         while i < len && depth > 0 {
-            // Skip strings
             if bytes[i] == b'\'' || bytes[i] == b'"' {
                 let quote = bytes[i];
                 i += 1;
@@ -717,14 +723,12 @@ impl Analyzer {
                 continue;
             }
 
-            // Check for nested {{ open
             if i + 1 < len && bytes[i] == b'{' && bytes[i + 1] == b'{' {
                 depth += 1;
                 i += 2;
                 continue;
             }
 
-            // Check for -}} close
             if i + 2 < len && bytes[i] == b'-' && bytes[i + 1] == b'}' && bytes[i + 2] == b'}' {
                 depth -= 1;
                 if depth == 0 {
@@ -734,7 +738,6 @@ impl Analyzer {
                 continue;
             }
 
-            // Check for }} close
             if i + 1 < len && bytes[i] == b'}' && bytes[i + 1] == b'}' {
                 depth -= 1;
                 if depth == 0 {
@@ -753,7 +756,6 @@ impl Analyzer {
     /// Pre-lex validation: check that `/*` and `*/` are properly matched.
     /// Detects unterminated multiline comments and stray `*/`.
     fn validate_comment_markers(source: &str) -> Result<(), SqlfmtError> {
-        // Check that /* and */ are properly paired.
         // SQL comments do NOT nest, so inner /* inside a comment is ignored.
         let bytes = source.as_bytes();
         let len = bytes.len();
@@ -762,7 +764,6 @@ impl Analyzer {
 
         while i < len {
             if in_comment {
-                // Inside a /* comment: only look for the closing */
                 if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
                     in_comment = false;
                     i += 2;
@@ -772,7 +773,6 @@ impl Analyzer {
                 continue;
             }
 
-            // Skip single-quoted strings
             if bytes[i] == b'\'' {
                 i += 1;
                 while i < len && bytes[i] != b'\'' {
@@ -784,7 +784,6 @@ impl Analyzer {
                 i += 1;
                 continue;
             }
-            // Skip double-quoted identifiers
             if bytes[i] == b'"' {
                 i += 1;
                 while i < len && bytes[i] != b'"' {
@@ -796,14 +795,12 @@ impl Analyzer {
                 i += 1;
                 continue;
             }
-            // Skip single-line comments
             if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
                 while i < len && bytes[i] != b'\n' {
                     i += 1;
                 }
                 continue;
             }
-            // Jinja tags: skip {{ }}, {% %}, {# #} with depth tracking
             if i + 1 < len
                 && bytes[i] == b'{'
                 && (bytes[i + 1] == b'{' || bytes[i + 1] == b'%' || bytes[i + 1] == b'#')
@@ -817,7 +814,6 @@ impl Analyzer {
                 let mut depth = 1;
                 i += 2;
                 while i + 1 < len && depth > 0 {
-                    // Skip strings inside Jinja tags
                     if bytes[i] == b'\'' || bytes[i] == b'"' {
                         let quote = bytes[i];
                         i += 1;
@@ -844,13 +840,11 @@ impl Analyzer {
                 }
                 continue;
             }
-            // Check for /* (open comment)
             if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
                 in_comment = true;
                 i += 2;
                 continue;
             }
-            // Check for stray */ (close without open)
             if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
                 return Err(SqlfmtError::Bracket(
                     "Encountered */ without a preceding /*".to_string(),

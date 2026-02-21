@@ -9,7 +9,7 @@ pub type NodeIndex = usize;
 /// These avoid heap allocation for the common case (0-8 elements).
 pub type BracketVec = SmallVec<[NodeIndex; 8]>;
 pub type JinjaBlockVec = SmallVec<[NodeIndex; 4]>;
-pub type FmtDisabledVec = SmallVec<[Token; 2]>;
+pub type FmtDisabledVec = SmallVec<[NodeIndex; 2]>;
 
 /// A Node wraps a Token with formatting metadata: depth, open brackets,
 /// open Jinja blocks, and a link to the previous node.
@@ -51,7 +51,18 @@ impl Node {
 
     /// Formatted string: prefix + value.
     pub fn to_formatted_string(&self) -> String {
-        format!("{}{}", self.prefix, self.value)
+        let mut s = String::with_capacity(self.prefix.len() + self.value.len());
+        s.push_str(&self.prefix);
+        s.push_str(&self.value);
+        s
+    }
+
+    /// Push formatted string (prefix + value) directly into the given buffer.
+    /// Avoids allocating a temporary String.
+    #[inline]
+    pub fn push_formatted_to(&self, buf: &mut String) {
+        buf.push_str(&self.prefix);
+        buf.push_str(&self.value);
     }
 
     /// Character length of the formatted string.

@@ -39,7 +39,6 @@ fn find_config_file(files: &[PathBuf]) -> Option<PathBuf> {
         if config.exists() {
             return Some(config);
         }
-        // Also check for sqlfmt.toml
         let config = parent.join("sqlfmt.toml");
         if config.exists() {
             return Some(config);
@@ -62,7 +61,6 @@ fn get_common_parents(files: &[PathBuf]) -> Vec<PathBuf> {
                 .unwrap_or_else(|| PathBuf::from("."))
         };
 
-        // Walk up to root
         let mut current = Some(parent.as_path());
         while let Some(dir) = current {
             let dir_buf = dir.to_path_buf();
@@ -83,12 +81,10 @@ fn load_config_from_path(path: &Path) -> Result<HashMap<String, toml::Value>, Sq
         .parse()
         .map_err(|e| SqlfmtError::Config(format!("Failed to parse {}: {}", path.display(), e)))?;
 
-    // Look for [tool.sqlfmt] section
     let section = parsed
         .get("tool")
         .and_then(|t| t.get("sqlfmt"))
         .or_else(|| {
-            // Also try top-level keys for sqlfmt.toml
             if path
                 .file_name()
                 .map(|n| n == "sqlfmt.toml")
@@ -133,7 +129,6 @@ fn apply_config(mode: &mut Mode, config: &HashMap<String, toml::Value>) -> Resul
         mode.no_jinjafmt = *b;
     }
 
-    // Validate no unknown keys
     let known_keys = [
         "line_length",
         "dialect",

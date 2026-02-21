@@ -1,6 +1,22 @@
+use std::sync::LazyLock;
+
 use crate::comment::Comment;
 use crate::node::{FmtDisabledVec, Node, NodeIndex};
 use crate::token::TokenType;
+
+/// Pre-computed indentation strings for common indent sizes (0..=80).
+/// Avoids allocating a new String on every `indentation()` call.
+/// Covers up to 20 nesting levels × 4 spaces each = 80 spaces.
+static INDENT_CACHE: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    (0..=80)
+        .map(|n| {
+            let s = " ".repeat(n);
+            // Leak the string to get a 'static reference.
+            // This is a one-time cost at program startup.
+            &*Box::leak(s.into_boxed_str())
+        })
+        .collect()
+});
 
 /// A Line is a collection of Nodes intended to be printed on one line,
 /// plus any attached comments.
@@ -41,7 +57,6 @@ impl Line {
                 return arena[idx].depth();
             }
         }
-        // Blank line: use previous_node depth or (0,0)
         self.previous_node
             .map(|i| arena[i].depth())
             .unwrap_or((0, 0))
@@ -53,9 +68,16 @@ impl Line {
         4 * (sql + jinja)
     }
 
-    /// Indentation prefix string.
-    pub fn indentation(&self, arena: &[Node]) -> String {
-        " ".repeat(self.indent_size(arena))
+    /// Indentation prefix string. Returns a cached `&str` for common sizes.
+    pub fn indentation<'a>(&self, arena: &[Node]) -> &'a str {
+        let size = self.indent_size(arena);
+        if size <= 80 {
+            INDENT_CACHE[size]
+        } else {
+            // Extremely deep nesting (>20 levels): leak a one-off string.
+            // This should essentially never happen in practice.
+            &*Box::leak(" ".repeat(size).into_boxed_str())
+        }
     }
 
     /// Render the line to a string (nodes only, no standalone comments).
@@ -63,7 +85,6 @@ impl Line {
         if self.is_blank_line(arena) {
             return "\n".to_string();
         }
-        // When formatting is disabled, preserve original whitespace and text
         if self.has_formatting_disabled() {
             return self.render_formatting_disabled(arena);
         }
@@ -75,12 +96,11 @@ impl Line {
                 continue;
             }
             if first_content {
-                // First content node: use indentation instead of prefix
-                result.push_str(&self.indentation(arena));
+                result.push_str(self.indentation(arena));
                 result.push_str(&node.value);
                 first_content = false;
             } else {
-                result.push_str(&node.to_formatted_string());
+                node.push_formatted_to(&mut result);
             }
         }
         result.push('\n');
@@ -95,11 +115,9 @@ impl Line {
         for &idx in &self.nodes {
             let node = &arena[idx];
             if node.is_newline() {
-                // Capture any trailing whitespace stored in the newline node's prefix
                 trailing_ws = node.token.prefix.clone();
                 continue;
             }
-            // Use original token prefix (indentation) and original token text
             result.push_str(&node.token.prefix);
             result.push_str(&node.token.token);
         }
@@ -123,9 +141,8 @@ impl Line {
 
         let mut result = String::new();
         let own_prefix = self.indentation(arena);
-        let prefix = indent_override.unwrap_or(&own_prefix);
+        let prefix = indent_override.unwrap_or(own_prefix);
 
-        // Standalone comments (and multiline non-standalone comments) go before the line.
         // A multiline comment that is not standalone (e.g., /* ... */ appearing mid-line)
         // must still be rendered as standalone to avoid being silently dropped.
         for comment in &self.comments {
@@ -134,22 +151,17 @@ impl Line {
             }
         }
 
-        // Render the main line content
         let base = self.render(arena);
         let has_only_newline_node = self.nodes.len() == 1 && arena[self.nodes[0]].is_newline();
         if has_only_newline_node && !result.is_empty() {
-            // If the line has only a newline node but we wrote comments,
-            // just return comments (don't add the extra newline)
             return result;
         }
 
-        // Inline comments appended at end of line
         let inline_comments: Vec<&Comment> =
             self.comments.iter().filter(|c| c.is_inline()).collect();
         if inline_comments.is_empty() {
             result.push_str(&base);
         } else {
-            // Strip trailing newline, add inline comment, re-add newline
             let trimmed = base.trim_end_matches('\n');
             result.push_str(trimmed);
             for c in inline_comments {
@@ -162,12 +174,50 @@ impl Line {
     }
 
     /// Length of the rendered line (longest sub-line if multiline Jinja).
+    /// Computed arithmetically for the common case to avoid allocating a String.
     pub fn len(&self, arena: &[Node]) -> usize {
-        self.render(arena)
-            .lines()
-            .map(|l| l.len())
-            .max()
-            .unwrap_or(0)
+        if self.is_blank_line(arena) {
+            return 1;
+        }
+        if self.has_formatting_disabled() {
+            return self
+                .render_formatting_disabled(arena)
+                .lines()
+                .map(|l| l.len())
+                .max()
+                .unwrap_or(0);
+        }
+        // Check if any node contains a newline (multiline jinja).
+        // If so, fall back to render-based measurement since we need
+        // to find the longest sub-line.
+        let has_multiline_node = self
+            .nodes
+            .iter()
+            .any(|&idx| !arena[idx].is_newline() && arena[idx].value.contains('\n'));
+        if has_multiline_node {
+            return self
+                .render(arena)
+                .lines()
+                .map(|l| l.len())
+                .max()
+                .unwrap_or(0);
+        }
+        // Fast path: compute length arithmetically
+        let mut length = self.indent_size(arena);
+        let mut first_content = true;
+        for &idx in &self.nodes {
+            let node = &arena[idx];
+            if node.is_newline() {
+                continue;
+            }
+            if first_content {
+                length += node.value.len();
+                first_content = false;
+            } else {
+                length += node.len(); // prefix.len() + value.len()
+            }
+        }
+        length
     }
 
     /// Length including inline comments (for merger length checks).
@@ -186,8 +236,6 @@ impl Line {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
-
-    // --- Content node helpers ---
 
     /// Get the first non-newline node.
     pub fn first_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
@@ -210,8 +258,6 @@ impl Line {
             .map(|&i| &arena[i])
             .find(|n| !n.is_newline())
     }
-
-    // --- Classification properties ---
 
     pub fn starts_with_comma(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
@@ -632,8 +678,7 @@ mod tests {
     fn test_has_formatting_disabled() {
         let mut line = Line::new(None);
         assert!(!line.has_formatting_disabled());
-        line.formatting_disabled
-            .push(Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11));
+        line.formatting_disabled.push(0);
         assert!(line.has_formatting_disabled());
     }
 

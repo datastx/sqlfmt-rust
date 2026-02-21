@@ -28,7 +28,6 @@ impl LineMerger {
             return lines.to_vec();
         }
 
-        // Try direct merge first
         match self.create_merged_line(lines, arena) {
             Ok(merged) => merged,
             Err(_) => {
@@ -36,120 +35,111 @@ impl LineMerger {
                 let segments = build_segments(lines, arena);
 
                 if segments.len() > 1 {
-                    // Fix standalone operators
                     let segments = self.fix_standalone_operators(segments, arena);
-
-                    // Merge operators by tier precedence
                     let tiers = OperatorPrecedence::tiers().to_vec();
                     let segments = self.maybe_merge_operators(segments, tiers, arena);
-
-                    // Stubborn merge for tight-binding operators
                     let segments = self.maybe_stubbornly_merge(segments, arena);
-
-                    // Recurse into each segment
                     for segment in &segments {
                         merged_lines.extend(self.maybe_merge_lines(&segment.lines, arena));
                     }
                 } else {
-                    // Single segment: move down one line and try again
-                    let only_segment = &segments[0];
-                    match only_segment.head(arena) {
-                        Ok((head_idx, _head_line)) => {
-                            // Include head line(s)
-                            let include_end = if !only_segment.lines.is_empty()
-                                && head_idx == 0
-                                && only_segment.lines[0]
-                                    .first_content_node(arena)
-                                    .map(|n| n.is_operator(arena) && !n.is_bracket_operator(arena))
-                                    .unwrap_or(false)
-                            {
-                                // Standalone operator: include first 2 lines
-                                (head_idx + 2).min(only_segment.lines.len())
-                            } else {
-                                head_idx + 1
-                            };
-                            merged_lines.extend_from_slice(&only_segment.lines[..include_end]);
-
-                            // Split remaining into segments and recurse
-                            if include_end < only_segment.lines.len() {
-                                let remaining = &only_segment.lines[include_end..];
-                                // Check if tail closes head
-                                if only_segment.tail_closes_head(arena) {
-                                    if let Ok((tail_idx, _)) = only_segment.tail(arena) {
-                                        let tail_start = only_segment.lines.len() - 1 - tail_idx;
-                                        if include_end < tail_start {
-                                            let inner =
-                                                &only_segment.lines[include_end..tail_start];
-                                            let merged_inner = self.maybe_merge_lines(inner, arena);
-
-                                            // If head is a JinjaBlockKeyword ({% else %},
-                                            // {% elif %}), try to merge it with the first
-                                            // non-blank inner line so we get
-                                            // "{% else %} {{ config() }}" on one line.
-                                            let head_is_jinja_keyword = merged_lines
-                                                .last()
-                                                .and_then(|l| l.first_content_node(arena))
-                                                .map(|n| {
-                                                    n.token.token_type
-                                                        == crate::token::TokenType::JinjaBlockKeyword
-                                                })
-                                                .unwrap_or(false);
-                                            if head_is_jinja_keyword && !merged_lines.is_empty() {
-                                                // Find first non-blank inner line
-                                                let first_content_idx = merged_inner
-                                                    .iter()
-                                                    .position(|l| !l.is_blank_line(arena));
-                                                if let Some(fci) = first_content_idx {
-                                                    let last_head = merged_lines.pop().unwrap();
-                                                    let first_inner = &merged_inner[fci];
-                                                    match self.create_merged_line(
-                                                        &[last_head.clone(), first_inner.clone()],
-                                                        arena,
-                                                    ) {
-                                                        Ok(merged) => {
-                                                            merged_lines.extend(merged);
-                                                            merged_lines.extend_from_slice(
-                                                                &merged_inner[fci + 1..],
-                                                            );
-                                                        }
-                                                        Err(_) => {
-                                                            merged_lines.push(last_head);
-                                                            merged_lines.extend(merged_inner);
-                                                        }
-                                                    }
-                                                } else {
-                                                    merged_lines.extend(merged_inner);
-                                                }
-                                            } else {
-                                                merged_lines.extend(merged_inner);
-                                            }
-                                            merged_lines.extend_from_slice(
-                                                &only_segment.lines[tail_start..],
-                                            );
-                                        } else {
-                                            merged_lines
-                                                .extend(self.maybe_merge_lines(remaining, arena));
-                                        }
-                                    } else {
-                                        merged_lines
-                                            .extend(self.maybe_merge_lines(remaining, arena));
-                                    }
-                                } else {
-                                    merged_lines.extend(self.maybe_merge_lines(remaining, arena));
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            merged_lines.extend_from_slice(&only_segment.lines);
-                        }
-                    }
+                    self.merge_single_segment(&segments[0], arena, &mut merged_lines);
                 }
 
-                // Convert leading commas to trailing commas: merge standalone
-                // commas with the preceding content line.
                 self.fix_standalone_commas(&mut merged_lines, arena);
-
                 merged_lines
+            }
+        }
+    }
+
+    /// Handle a single segment: peel off the head line(s), then recurse
+    /// into remaining lines (splitting around tail if it closes head).
+    fn merge_single_segment(
+        &self,
+        segment: &Segment,
+        arena: &[Node],
+        merged_lines: &mut Vec<Line>,
+    ) {
+        let Ok((head_idx, _)) = segment.head(arena) else {
+            merged_lines.extend_from_slice(&segment.lines);
+            return;
+        };
+
+        let include_end = if !segment.lines.is_empty()
+            && head_idx == 0
+            && segment.lines[0]
+                .first_content_node(arena)
+                .map(|n| n.is_operator(arena) && !n.is_bracket_operator(arena))
+                .unwrap_or(false)
+        {
+            (head_idx + 2).min(segment.lines.len())
+        } else {
+            head_idx + 1
+        };
+        merged_lines.extend_from_slice(&segment.lines[..include_end]);
+
+        if include_end >= segment.lines.len() {
+            return;
+        }
+
+        let remaining = &segment.lines[include_end..];
+
+        if !segment.tail_closes_head(arena) {
+            merged_lines.extend(self.maybe_merge_lines(remaining, arena));
+            return;
+        }
+        let Ok((tail_idx, _)) = segment.tail(arena) else {
+            merged_lines.extend(self.maybe_merge_lines(remaining, arena));
+            return;
+        };
+        let tail_start = segment.lines.len() - 1 - tail_idx;
+        if include_end >= tail_start {
+            merged_lines.extend(self.maybe_merge_lines(remaining, arena));
+            return;
+        }
+
+        let inner = &segment.lines[include_end..tail_start];
+        let merged_inner = self.maybe_merge_lines(inner, arena);
+        self.try_merge_jinja_keyword_with_inner(merged_lines, merged_inner, arena);
+        merged_lines.extend_from_slice(&segment.lines[tail_start..]);
+    }
+
+    /// If the last head line is a JinjaBlockKeyword ({% else %}, {% elif %}),
+    /// try to merge it with the first non-blank inner line.
+    fn try_merge_jinja_keyword_with_inner(
+        &self,
+        merged_lines: &mut Vec<Line>,
+        merged_inner: Vec<Line>,
+        arena: &[Node],
+    ) {
+        let head_is_jinja_keyword = merged_lines
+            .last()
+            .and_then(|l| l.first_content_node(arena))
+            .map(|n| n.token.token_type == crate::token::TokenType::JinjaBlockKeyword)
+            .unwrap_or(false);
+
+        if !head_is_jinja_keyword {
+            merged_lines.extend(merged_inner);
+            return;
+        }
+
+        let Some(fci) = merged_inner.iter().position(|l| !l.is_blank_line(arena)) else {
+            merged_lines.extend(merged_inner);
+            return;
+        };
+
+        let last_head = merged_lines
+            .pop()
+            .expect("head_is_jinja_keyword requires non-empty merged_lines");
+        let first_inner = &merged_inner[fci];
+        match self.create_merged_line(&[last_head.clone(), first_inner.clone()], arena) {
+            Ok(merged) => {
+                merged_lines.extend(merged);
+                merged_lines.extend_from_slice(&merged_inner[fci + 1..]);
+            }
+            Err(_) => {
+                merged_lines.push(last_head);
+                merged_lines.extend(merged_inner);
             }
         }
     }
@@ -163,7 +153,6 @@ impl LineMerger {
         let mut i = 0;
         while i < lines.len() {
             if lines[i].is_standalone_comma(arena) && i > 0 {
-                // Find the preceding non-blank, non-comment content line
                 let mut prev_idx = None;
                 for j in (0..i).rev() {
                     if !lines[j].is_blank_line(arena) && !lines[j].is_standalone_comment_line(arena)
@@ -189,18 +178,13 @@ impl LineMerger {
                         i += 1;
                         continue;
                     }
-                    // Try to merge comma with preceding line
                     let to_merge = vec![lines[pi].clone(), lines[i].clone()];
                     if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
                         if let Some(merged_line) =
                             merged.into_iter().find(|l| !l.is_blank_line(arena))
                         {
                             lines[pi] = merged_line;
-                            // Remove the comma line
                             lines.remove(i);
-                            // Also remove blank lines between pi and the
-                            // next content (comments/non-blank) that were
-                            // separating the comma from the content.
                             while pi + 1 < lines.len() && lines[pi + 1].is_blank_line(arena) {
                                 lines.remove(pi + 1);
                             }
@@ -220,8 +204,6 @@ impl LineMerger {
             return Ok(lines.to_vec());
         }
 
-        // Extract leading/trailing blank and standalone-comment lines.
-        // These are preserved around the merged content.
         let leading_count = lines
             .iter()
             .take_while(|l| l.is_blank_line(arena) || l.is_standalone_comment_line(arena))
@@ -251,7 +233,6 @@ impl LineMerger {
             return Err(ControlFlow::CannotMerge);
         }
 
-        // Assemble result: leading non-content + merged + trailing non-content
         let mut result = lines[..content_start].to_vec();
         result.push(merged_line);
         result.extend_from_slice(&lines[content_end..]);
@@ -294,8 +275,6 @@ impl LineMerger {
             }
         }
 
-        // Standalone comment-only lines in the middle of content cannot be merged,
-        // as they need to stay on their own line.
         let first_content = lines
             .iter()
             .position(|l| !l.is_blank_line(arena) && !l.is_standalone_comment_line(arena));
@@ -325,7 +304,6 @@ impl LineMerger {
         let mut jinja_block_depth: i32 = 0;
 
         for line in lines {
-            // Check unmergeable conditions
             if has_multiline_jinja {
                 let starts_with_op = line
                     .first_content_node(arena)
@@ -335,8 +313,6 @@ impl LineMerger {
                 if !starts_with_op && !starts_with_comma {
                     return Err(ControlFlow::CannotMerge);
                 }
-                // If the current line ALSO has multiline Jinja, reject the merge.
-                // Two multiline Jinja expressions on the same logical line is too complex.
                 let current_has_multiline = line
                     .nodes
                     .iter()
@@ -346,8 +322,6 @@ impl LineMerger {
                 }
             }
 
-            // A line with multiline Jinja shouldn't be merged with preceding
-            // non-multiline content. The multiline content needs its own line.
             if !nodes.is_empty() && !has_multiline_jinja {
                 let current_has_multiline = line
                     .nodes
@@ -358,8 +332,6 @@ impl LineMerger {
                 }
             }
 
-            // Don't merge a JinjaBlockEnd ({% endif %}, {% endfor %}, etc.)
-            // unless its matching JinjaBlockStart is also being merged.
             if !nodes.is_empty() {
                 if let Some(first) = line.first_content_node(arena) {
                     if first.token.token_type == crate::token::TokenType::JinjaBlockEnd
@@ -370,9 +342,6 @@ impl LineMerger {
                 }
             }
 
-            // Don't merge an ON line that contains multiline Jinja with
-            // preceding content. The ON clause with multiline Jinja is too
-            // complex to fit naturally on the same line as the table name.
             if !nodes.is_empty() {
                 if let Some(first) = line.first_content_node(arena) {
                     if first.token.token_type == crate::token::TokenType::On {
@@ -391,23 +360,19 @@ impl LineMerger {
             for &node_idx in &line.nodes {
                 let node = &arena[node_idx];
 
-                // Can't merge lines with disabled formatting
                 if !node.formatting_disabled.is_empty() {
                     return Err(ControlFlow::CannotMerge);
                 }
-                // Can't merge FmtOff/FmtOn directives with other content
                 if matches!(
                     node.token.token_type,
                     crate::token::TokenType::FmtOff | crate::token::TokenType::FmtOn
                 ) {
                     return Err(ControlFlow::CannotMerge);
                 }
-                // Can't merge query dividers
                 if node.divides_queries() {
                     return Err(ControlFlow::CannotMerge);
                 }
 
-                // Track jinja block nesting
                 match node.token.token_type {
                     crate::token::TokenType::JinjaBlockStart => {
                         // Two JinjaBlockStart tokens shouldn't be merged
@@ -438,7 +403,6 @@ impl LineMerger {
             return Err(ControlFlow::CannotMerge);
         }
 
-        // Add final newline
         if let Some(nl) = final_newline {
             nodes.push(nl);
         }
@@ -460,10 +424,10 @@ impl LineMerger {
                     .unwrap_or(false);
 
                 if is_standalone_op && segment.lines.len() > head_idx + 1 {
-                    // Try to merge the operator line with the next line
                     let merge_end = (head_idx + 2).min(segment.lines.len());
-                    let to_merge = segment.lines[head_idx..merge_end].to_vec();
-                    if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
+                    if let Ok(merged) =
+                        self.create_merged_line(&segment.lines[head_idx..merge_end], arena)
+                    {
                         let mut new_lines = segment.lines[..head_idx].to_vec();
                         new_lines.extend(merged);
                         new_lines.extend_from_slice(&segment.lines[merge_end..]);
@@ -482,11 +446,12 @@ impl LineMerger {
         mut op_tiers: Vec<OperatorPrecedence>,
         arena: &[Node],
     ) -> Vec<Segment> {
-        if segments.len() <= 1 || op_tiers.is_empty() {
+        let Some(precedence) = op_tiers.pop() else {
+            return segments;
+        };
+        if segments.len() <= 1 {
             return segments;
         }
-
-        let precedence = op_tiers.pop().unwrap();
         let mut new_segments: Vec<Segment> = Vec::new();
         let mut head = 0;
 
@@ -500,7 +465,6 @@ impl LineMerger {
                 head = i;
             }
         }
-        // Final run
         new_segments.extend(self.try_merge_operator_segments(&segments[head..], op_tiers, arena));
 
         new_segments
@@ -525,28 +489,18 @@ impl LineMerger {
             Ok((_, line)) => {
                 let first = line.first_content_node(arena);
                 match first {
-                    // ON merges with previous (join condition) — but NOT when
-                    // the ON clause has additional AND/OR conditions on subsequent
-                    // lines (those appear as the next segment), and NOT when the
-                    // ON segment or the next segment contains multiline Jinja
-                    // (the merged result would be too complex).
                     Some(n) if n.token.token_type == crate::token::TokenType::On => {
                         if let Some(next) = next_segment {
                             if let Ok((_, next_line)) = next.head(arena) {
                                 if let Some(nn) = next_line.first_content_node(arena) {
-                                    // Don't merge if next segment starts with boolean operator
                                     if nn.is_boolean_operator() {
                                         return false;
                                     }
-                                    // Don't merge if next segment starts with a comparison
-                                    // operator (=, >, <, etc.) — means the join condition
-                                    // spans multiple lines
                                     if nn.is_operator(arena) {
                                         return false;
                                     }
                                 }
                             }
-                            // Don't merge if the next segment has multiline Jinja
                             let next_has_multiline = next.lines.iter().any(|l| {
                                 l.nodes.iter().any(|&idx| arena[idx].is_multiline_jinja())
                             });
@@ -554,7 +508,6 @@ impl LineMerger {
                                 return false;
                             }
                         }
-                        // Don't merge if the ON segment itself contains multiline Jinja
                         let has_multiline = segment
                             .lines
                             .iter()
@@ -564,7 +517,6 @@ impl LineMerger {
                         }
                         true
                     }
-                    // USING merges only when followed by ( (join condition, not DELETE)
                     Some(n)
                         if n.token.token_type == crate::token::TokenType::UntermKeyword
                             && n.value.eq_ignore_ascii_case("using") =>
@@ -575,11 +527,6 @@ impl LineMerger {
                             })
                         })
                     }
-                    // LATERAL merges with previous when previous ends with comma
-                    // (FROM clause: "from t1, lateral flatten(...)")
-                    // But NOT when the LATERAL's bracket has multiline content
-                    // that can't fit on one line (the lateral subquery needs its
-                    // own line in that case).
                     Some(n)
                         if n.token.token_type == crate::token::TokenType::UntermKeyword
                             && n.value.eq_ignore_ascii_case("lateral") =>
@@ -592,7 +539,6 @@ impl LineMerger {
                         if !prev_ends_comma {
                             return false;
                         }
-                        // Only merge if the lateral segment can fit on one line
                         self.create_merged_line(&segment.lines, arena).is_ok()
                     }
                     _ => false,
@@ -639,8 +585,11 @@ impl LineMerger {
             return segments.to_vec();
         }
 
-        // Flatten all lines and try merge
-        let all_lines: Vec<Line> = segments.iter().flat_map(|s| s.lines.clone()).collect();
+        let total_lines: usize = segments.iter().map(|s| s.lines.len()).sum();
+        let mut all_lines = Vec::with_capacity(total_lines);
+        for s in segments {
+            all_lines.extend_from_slice(&s.lines);
+        }
         match self.create_merged_line(&all_lines, arena) {
             Ok(merged) => vec![Segment::new(merged)],
             Err(_) => self.maybe_merge_operators(segments.to_vec(), op_tiers, arena),
@@ -653,17 +602,17 @@ impl LineMerger {
             return segments;
         }
 
-        // Phase 1: Stubborn-merge P0 operators (OtherTight: as, over, etc.)
-        let mut new_segments = vec![segments[0].clone()];
-        for segment in segments.iter().skip(1) {
+        let mut iter = segments.into_iter();
+        let mut new_segments = vec![iter.next().unwrap()];
+        for segment in iter {
             if self.segment_continues_operator_sequence(
-                segment,
+                &segment,
                 OperatorPrecedence::OtherTight,
                 arena,
             ) {
-                new_segments = self.stubbornly_merge(&new_segments, segment, arena);
+                new_segments = self.stubbornly_merge(&new_segments, &segment, arena);
             } else {
-                new_segments.push(segment.clone());
+                new_segments.push(segment);
             }
         }
 
@@ -671,7 +620,6 @@ impl LineMerger {
             return new_segments;
         }
 
-        // Phase 2: Stubborn-merge P1 operators (up to Comparators) that close brackets
         let p1_flags: Vec<bool> = new_segments
             .iter()
             .map(|s| {
@@ -680,16 +628,20 @@ impl LineMerger {
             .collect();
 
         let segments = new_segments;
-        let mut new_segments = vec![segments[0].clone()];
-        for i in 1..segments.len() {
+        let mut new_segments = Vec::with_capacity(segments.len());
+        for (i, segment) in segments.into_iter().enumerate() {
+            if i == 0 {
+                new_segments.push(segment);
+                continue;
+            }
             if !p1_flags[i - 1]
                 && p1_flags[i]
-                && Segment::new(self.safe_create_merged_line(&segments[i].lines, arena))
+                && Segment::new(self.safe_create_merged_line(&segment.lines, arena))
                     .tail_closes_head(arena)
             {
-                new_segments = self.stubbornly_merge(&new_segments, &segments[i], arena);
+                new_segments = self.stubbornly_merge(&new_segments, &segment, arena);
             } else {
-                new_segments.push(segments[i].clone());
+                new_segments.push(segment);
             }
         }
 
@@ -697,13 +649,15 @@ impl LineMerger {
             return new_segments;
         }
 
-        // Phase 3: Stubborn-merge join condition clauses (USING/ON) with
-        // preceding segments. This allows "left join table\nusing (id)" to
-        // merge into "left join table using (id)" when it fits.
+        // Phase 3 needs indexed access for look-ahead (segments.get(i + 1)),
+        // so we keep indexed iteration here.
         let segments = new_segments;
-        let mut new_segments = vec![segments[0].clone()];
+        let mut new_segments = Vec::with_capacity(segments.len());
+        new_segments.push(segments[0].clone());
         for i in 1..segments.len() {
-            let prev = new_segments.last().unwrap();
+            let prev = new_segments
+                .last()
+                .expect("new_segments initialized with segments[0]");
             let next = segments.get(i + 1);
             if self.segment_should_stubbornly_merge(&segments[i], prev, next, arena) {
                 new_segments = self.stubbornly_merge(&new_segments, &segments[i], arena);
@@ -741,8 +695,8 @@ impl LineMerger {
         };
         let (head_idx, head_line) = head;
 
-        // Try 1: Merge head of this segment with entire previous segment
-        let mut try_lines = prev_segment.lines.clone();
+        let mut try_lines = Vec::with_capacity(prev_segment.lines.len() + 1);
+        try_lines.extend_from_slice(&prev_segment.lines);
         try_lines.push(head_line.clone());
         if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
             let mut result_seg = Segment::new(merged);
@@ -753,10 +707,10 @@ impl LineMerger {
             return new_segments;
         }
 
-        // Try 2: Merge entire segment onto last line of previous segment
         if let Ok((tail_idx, tail_line)) = prev_segment.tail(arena) {
-            let mut try_lines = vec![tail_line.clone()];
-            try_lines.extend(segment.lines.clone());
+            let mut try_lines = Vec::with_capacity(1 + segment.lines.len());
+            try_lines.push(tail_line.clone());
+            try_lines.extend_from_slice(&segment.lines);
             if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
                 let tail_start = prev_segment.lines.len() - 1 - tail_idx;
                 let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
@@ -765,8 +719,7 @@ impl LineMerger {
                 return new_segments;
             }
 
-            // Try 3: Merge just head of this segment onto last line of previous segment
-            let try_lines = vec![tail_line.clone(), head_line.clone()];
+            let try_lines = vec![tail_line.clone(), head_line];
             if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
                 let tail_start = prev_segment.lines.len() - 1 - tail_idx;
                 let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
@@ -779,7 +732,6 @@ impl LineMerger {
             }
         }
 
-        // Give up
         new_segments.push(prev_segment);
         new_segments.push(segment.clone());
         new_segments
@@ -890,19 +842,12 @@ mod tests {
 
         // Create a line with formatting disabled
         let a = make_node(&mut arena, TokenType::Name, "a", "");
-        arena[a].formatting_disabled =
-            smallvec::smallvec![Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11)];
+        arena[a].formatting_disabled = smallvec::smallvec![0usize];
         let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
         let mut disabled_line = Line::new(None);
         disabled_line.append_node(a);
         disabled_line.append_node(nl);
-        disabled_line.formatting_disabled.push(Token::new(
-            TokenType::FmtOff,
-            "",
-            "-- fmt: off",
-            0,
-            11,
-        ));
+        disabled_line.formatting_disabled.push(0);
 
         let merger = LineMerger::new(88);
         let result = merger.maybe_merge_lines(&[disabled_line], &arena);

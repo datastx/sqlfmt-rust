@@ -86,11 +86,9 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    // Check for stdin mode
     let is_stdin = cli.files.len() == 1 && cli.files[0].to_string_lossy() == "-";
 
-    // Load configuration
-    let base_mode = match sqlfmt::config::load_config(&cli.files, cli.config.as_deref()) {
+    let base_mode = match sqlfmt::load_config(&cli.files, cli.config.as_deref()) {
         Ok(mode) => mode,
         Err(e) => {
             eprintln!("Configuration error: {}", e);
@@ -98,7 +96,6 @@ fn main() {
         }
     };
 
-    // Override config with CLI options
     let mode = Mode {
         line_length: cli.line_length,
         dialect_name: cli.dialect,
@@ -123,7 +120,6 @@ fn main() {
     };
 
     if is_stdin {
-        // Read from stdin, write to stdout
         let mut source = String::new();
         if let Err(e) = io::stdin().read_to_string(&mut source) {
             eprintln!("Error reading stdin: {}", e);
@@ -140,41 +136,40 @@ fn main() {
             }
         }
     } else {
-        // Format files
         let report = sqlfmt::run(&cli.files, &mode);
 
-        // Print report
         if !mode.quiet {
-            if mode.verbose {
-                for result in &report.results {
-                    match result.status {
-                        sqlfmt::report::FileStatus::Changed => {
-                            eprintln!("reformatted {}", result.path.display());
-                        }
-                        sqlfmt::report::FileStatus::Error => {
-                            eprintln!(
-                                "error: {}: {}",
-                                result.path.display(),
-                                result.error.as_deref().unwrap_or("unknown error")
-                            );
-                        }
-                        sqlfmt::report::FileStatus::Unchanged => {
-                            // Only in verbose mode
-                        }
-                    }
-                }
-            }
-
+            print_verbose_results(&report, &mode);
             eprintln!("{}", report.summary());
         }
 
         report.print_errors();
 
-        // Exit code: 0 = success, 1 = check found changes, 2 = errors
         if report.has_errors() {
             std::process::exit(2);
         } else if mode.check && report.has_changes() {
             std::process::exit(1);
+        }
+    }
+}
+
+fn print_verbose_results(report: &sqlfmt::report::Report, mode: &Mode) {
+    if !mode.verbose {
+        return;
+    }
+    for result in &report.results {
+        match result.status {
+            sqlfmt::report::FileStatus::Changed => {
+                eprintln!("reformatted {}", result.path.display());
+            }
+            sqlfmt::report::FileStatus::Error => {
+                eprintln!(
+                    "error: {}: {}",
+                    result.path.display(),
+                    result.error.as_deref().unwrap_or("unknown error")
+                );
+            }
+            sqlfmt::report::FileStatus::Unchanged => {}
         }
     }
 }

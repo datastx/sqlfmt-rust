@@ -34,22 +34,19 @@ impl NodeManager {
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> Node {
-        // Compute open_brackets and open_jinja_blocks from previous_node chain
         // This matches the Python pattern where depth propagates through nodes
         let (open_brackets, open_jinja_blocks) =
             self.compute_open_brackets(&token, previous_node, arena);
 
-        // Compute formatting_disabled from previous_node
         let formatting_disabled = self.compute_formatting_disabled(&token, previous_node, arena);
 
         let (prefix, value) = if !formatting_disabled.is_empty() {
-            // When formatting is disabled, preserve original whitespace and value
             (token.prefix.clone(), token.token.clone())
         } else {
             let prefix = self
                 .compute_prefix(&token, previous_node, arena)
                 .into_owned();
-            let value = self.standardize_value(&token);
+            let value = self.standardize_value(&token).into_owned();
             (prefix, value)
         };
 
@@ -76,7 +73,6 @@ impl NodeManager {
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> (BracketVec, JinjaBlockVec) {
-        // NODE's open_brackets: includes unterm keywords for depth
         let (mut node_brackets, mut node_jinja) = match previous_node {
             None => (SmallVec::new(), SmallVec::new()),
             Some(prev_idx) => {
@@ -84,7 +80,6 @@ impl NodeManager {
                 let mut ob = prev.open_brackets.clone();
                 let mut oj = prev.open_jinja_blocks.clone();
 
-                // Add previous node to brackets if it opens a scope.
                 // LATERAL is an unterm keyword for splitting but does NOT
                 // increase depth for the next node — it's a FROM clause
                 // modifier, not a clause-level keyword.
@@ -102,10 +97,8 @@ impl NodeManager {
             }
         };
 
-        // Handle tokens that reduce depth
         match token.token_type {
             TokenType::UntermKeyword | TokenType::SetOperator => {
-                // Pop last unterm keyword if any (unterm keywords at same depth replace each other).
                 // LATERAL should NOT pop the previous keyword — it's a modifier
                 // within the FROM clause, not a replacement for FROM.
                 let is_lateral = token.token.eq_ignore_ascii_case("lateral");
@@ -118,8 +111,6 @@ impl NodeManager {
                 }
             }
             TokenType::BracketClose | TokenType::StatementEnd => {
-                // Pop until we find the matching opening bracket
-                // First pop unterm keyword on top if any
                 while let Some(last) = node_brackets.last() {
                     if arena[*last].is_unterm_keyword() {
                         node_brackets.pop();
@@ -127,7 +118,6 @@ impl NodeManager {
                         break;
                     }
                 }
-                // Now pop the actual bracket
                 node_brackets.pop();
             }
             TokenType::JinjaBlockEnd => {
@@ -177,7 +167,8 @@ impl NodeManager {
         };
 
         if matches!(token.token_type, TokenType::FmtOff | TokenType::Data) {
-            formatting_disabled.push(token.clone());
+            // Push a marker index (the value doesn't matter, only non-emptiness is checked)
+            formatting_disabled.push(previous_node.unwrap_or(0));
         }
 
         if !formatting_disabled.is_empty() {
@@ -191,7 +182,6 @@ impl NodeManager {
             }
         }
 
-        // Keep NodeManager state in sync
         self.formatting_disabled = formatting_disabled.clone();
 
         formatting_disabled
@@ -235,29 +225,24 @@ impl NodeManager {
     ) -> Cow<'static, str> {
         let tt = token.token_type;
 
-        // No prefix for the very first token
         if previous_node.is_none() {
             return Cow::Borrowed("");
         }
 
-        // Tokens that are never preceded by a space
         if tt.is_never_preceded_by_space() {
             return Cow::Borrowed("");
         }
 
-        // Look at the previous meaningful SQL token (skipping newlines/jinja statements)
         let (prev, extra_whitespace) = Self::get_previous_token(previous_node, arena);
         let prev_type = prev.map(|n| n.token.token_type);
 
-        // No space after an open bracket, cast operator (::), or colon
         if matches!(
             prev_type,
-            Some(TokenType::BracketOpen) | Some(TokenType::DoublColon) | Some(TokenType::Colon)
+            Some(TokenType::BracketOpen) | Some(TokenType::DoubleColon) | Some(TokenType::Colon)
         ) {
             return Cow::Borrowed("");
         }
 
-        // Names/stars preceded by dots or colons are namespaced identifiers — no space
         // This must come BEFORE the is_preceded_by_space check so that
         // `table.*` renders as `table.*` not `table. *`
         if tt.is_possible_name()
@@ -266,13 +251,10 @@ impl NodeManager {
             return Cow::Borrowed("");
         }
 
-        // Numbers preceded by colons are simple slices — no space
         if tt == TokenType::Number && prev_type == Some(TokenType::Colon) {
             return Cow::Borrowed("");
         }
 
-        // No space between unary +/- and the following number/dot
-        // Unary context: the +/- follows an operator, keyword, comma, or open bracket
         if matches!(tt, TokenType::Number | TokenType::Dot | TokenType::Name)
             && prev_type == Some(TokenType::Operator)
         {
@@ -293,7 +275,7 @@ impl NodeManager {
                                 | TokenType::SetOperator
                                 | TokenType::Star
                                 | TokenType::On
-                                | TokenType::DoublColon
+                                | TokenType::DoubleColon
                         ),
                     };
                     if is_unary {
@@ -303,8 +285,7 @@ impl NodeManager {
             }
         }
 
-        // No space after a select-star when followed by "columns"
-        // (DuckDB *COLUMNS pattern — *REPLACE and *EXCLUDE are handled by star_replace_exclude rule)
+        // *REPLACE and *EXCLUDE are handled by the star_replace_exclude rule
         if tt == TokenType::Name && prev_type == Some(TokenType::Star) {
             if let Some(prev_node) = prev {
                 if !prev_node.is_multiplication_star(arena)
@@ -315,8 +296,6 @@ impl NodeManager {
             }
         }
 
-        // No space between single-char string prefix (r, b, f, u, x, e) and following quoted string
-        // Handles raw strings: r'...', binary strings: b'...', etc.
         if tt == TokenType::Name && prev_type == Some(TokenType::Name) {
             if let Some(prev_node) = prev {
                 let pv = &prev_node.value;
@@ -342,14 +321,11 @@ impl NodeManager {
             }
         }
 
-        // Always a space before keywords/operators/etc. except after open bracket
         if tt.is_preceded_by_space_except_after_open_bracket() {
             return Cow::Borrowed(" ");
         }
 
-        // Open brackets with `<` (BQ type definitions like array<int64>)
         if tt == TokenType::BracketOpen && token.token.contains('<') {
-            // No space after array/struct/map (these are type constructors)
             if let Some(prev_node) = prev {
                 let lv = prev_node.value.to_ascii_lowercase();
                 if lv == "array" || lv == "struct" || lv == "map" || lv == "table" {
@@ -363,7 +339,6 @@ impl NodeManager {
             }
         }
 
-        // "lateral(" — no space (DuckDB/Postgres lateral subquery)
         if tt == TokenType::BracketOpen && prev_type == Some(TokenType::UntermKeyword) {
             if let Some(prev_node) = prev {
                 if prev_node.value.eq_ignore_ascii_case("lateral") {
@@ -372,9 +347,6 @@ impl NodeManager {
             }
         }
 
-        // Open brackets that follow names/quoted names are function calls
-        // Open brackets that follow closing brackets are array indexes
-        // Open brackets that follow open brackets are nested brackets
         // EXCEPTION: "filter(" and "offset(" after a closing bracket are clause keywords,
         // not function calls, and need a space: e.g., count(*) filter (where ...)
         if tt == TokenType::BracketOpen
@@ -409,19 +381,15 @@ impl NodeManager {
             return Cow::Borrowed("");
         }
 
-        // Open square brackets after colons are Databricks variant cols
         if tt == TokenType::BracketOpen && token.token == "[" && prev_type == Some(TokenType::Colon)
         {
             return Cow::Borrowed("");
         }
 
-        // Need a space before any other open bracket
         if tt == TokenType::BracketOpen {
             return Cow::Borrowed(" ");
         }
 
-        // Jinja block keywords ({% else %}, {% elif %}) always attach directly
-        // to preceding content without a space.
         if tt == TokenType::JinjaBlockKeyword {
             return Cow::Borrowed("");
         }
@@ -438,7 +406,6 @@ impl NodeManager {
             }
         }
 
-        // After a jinja expression, respect original whitespace
         if prev_type == Some(TokenType::JinjaExpression) {
             if !token.prefix.is_empty() || extra_whitespace {
                 return Cow::Borrowed(" ");
@@ -447,7 +414,6 @@ impl NodeManager {
             }
         }
 
-        // Default: one space
         Cow::Borrowed(" ")
     }
 
@@ -472,42 +438,47 @@ impl NodeManager {
     /// Standardize the token value: lowercase keywords, normalize whitespace, preserve names.
     /// Mirrors Python's standardize_value which also normalizes internal whitespace
     /// in multi-word keywords (e.g., "ORDER  BY" => "order by").
-    fn standardize_value(&self, token: &Token) -> String {
+    /// Returns Cow::Borrowed when the value doesn't need changing (fast path).
+    fn standardize_value<'a>(&self, token: &'a Token) -> Cow<'a, str> {
         let tt = token.token_type;
 
         if tt.is_always_lowercased() {
-            // Normalize internal whitespace for multi-word keywords
-            return token
-                .token
-                .to_ascii_lowercase()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+            // Fast path: if already lowercase and single-word, borrow directly
+            if !token.token.contains(|c: char| c.is_ascii_whitespace())
+                && token.token.bytes().all(|b| !b.is_ascii_uppercase())
+            {
+                return Cow::Borrowed(&token.token);
+            }
+            return Cow::Owned(
+                token
+                    .token
+                    .to_ascii_lowercase()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         }
 
-        // Lowercase number literals (hex 0xFF→0xff, octal 0O→0o, scientific 1E9→1e9)
         if tt == TokenType::Number {
-            return token.token.to_ascii_lowercase();
+            if token.token.bytes().all(|b| !b.is_ascii_uppercase()) {
+                return Cow::Borrowed(&token.token);
+            }
+            return Cow::Owned(token.token.to_ascii_lowercase());
         }
 
-        // For non-quoted names in case-insensitive mode, lowercase —
-        // but preserve case for string literals (single-quoted) and dollar-quoted strings
         if !self.case_sensitive_names && tt == TokenType::Name {
             let first = token.token.as_bytes().first().copied();
             if matches!(first, Some(b'\'') | Some(b'$')) {
-                return token.token.clone();
+                return Cow::Borrowed(&token.token);
             }
-            return token.token.to_ascii_lowercase();
+            if token.token.bytes().all(|b| !b.is_ascii_uppercase()) {
+                return Cow::Borrowed(&token.token);
+            }
+            return Cow::Owned(token.token.to_ascii_lowercase());
         }
 
-        // Jinja tokens: preserve original text; quote normalization happens
-        // in JinjaFormatter where we can selectively apply it (e.g., skip
-        // multiline-preserved content like {% extends ... else 'default.html' %})
-        if tt.is_jinja() {
-            return token.token.clone();
-        }
-
-        token.token.clone()
+        // Jinja tokens, quoted names, etc.: preserve original text
+        Cow::Borrowed(&token.token)
     }
 
     /// Enable formatting (handle fmt:on).
@@ -516,8 +487,8 @@ impl NodeManager {
     }
 
     /// Disable formatting (handle fmt:off).
-    pub fn disable_formatting(&mut self, token: Token) {
-        self.formatting_disabled.push(token);
+    pub fn disable_formatting(&mut self) {
+        self.formatting_disabled.push(0);
     }
 
     /// Check if formatting is currently disabled.
@@ -567,7 +538,6 @@ mod tests {
         nm.push_bracket(5);
         assert_eq!(nm.open_brackets.len(), 2);
 
-        // Brackets are now tracked via compute_open_brackets in create_node
         nm.open_brackets.pop();
         assert_eq!(nm.open_brackets.len(), 1);
     }
@@ -577,8 +547,7 @@ mod tests {
         let mut nm = NodeManager::new(false);
         assert!(!nm.is_formatting_disabled());
 
-        let off_token = Token::new(TokenType::FmtOff, "", "-- fmt: off", 0, 11);
-        nm.disable_formatting(off_token);
+        nm.disable_formatting();
         assert!(nm.is_formatting_disabled());
 
         nm.enable_formatting();

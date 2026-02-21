@@ -55,7 +55,7 @@ impl Query {
                     return Some(prefix.clone());
                 }
             }
-            return Some(next.indentation(arena));
+            return Some(next.indentation(arena).to_string());
         }
         None
     }
