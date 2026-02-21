@@ -4,7 +4,9 @@ use crate::action::Action;
 
 /// A lexing rule: name, priority, compiled regex, and action.
 /// Rules are tried in ascending priority order; first match wins.
-#[derive(Clone)]
+///
+/// Rules are constructed once in `LazyLock` statics and referenced via
+/// `&'static [Rule]`, so `Clone` is not needed.
 pub struct Rule {
     pub name: String,
     pub priority: u32,

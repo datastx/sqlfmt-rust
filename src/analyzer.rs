@@ -16,7 +16,7 @@ pub struct Analyzer {
     pub node_manager: NodeManager,
     pub arena: Vec<Node>,
 
-    rule_stack: Vec<Vec<Rule>>,
+    rule_stack: Vec<&'static [Rule]>,
     node_buffer: Vec<NodeIndex>,
     comment_buffer: Vec<Comment>,
     line_buffer: Vec<Line>,
@@ -36,7 +36,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new(rules: Vec<Rule>, node_manager: NodeManager, line_length: usize) -> Self {
+    pub fn new(rules: &'static [Rule], node_manager: NodeManager, line_length: usize) -> Self {
         Self {
             line_length,
             node_manager,
@@ -73,53 +73,42 @@ impl Analyzer {
     }
 
     /// Try each rule in priority order; execute the first match.
-    /// Split into two phases to avoid cloning the entire Vec<Rule> per token:
-    /// 1. Match phase: immutable borrow of rule_stack to find match + extract strings
-    /// 2. Execute phase: mutable borrow of self to process the match
+    /// Rules are `&'static [Rule]`, so borrowing the action gives `&'static Action`
+    /// which doesn't conflict with the mutable borrow of `self` in execute_action.
     fn lex_one(&mut self, source: &str) -> Result<(), SqlfmtError> {
         let remaining = &source[self.pos..];
         if remaining.is_empty() {
             return Ok(());
         }
 
-        // Captures borrow from `remaining` (which borrows from `source`, not `self`),
-        // so &str slices can safely cross the borrow boundary into execute_action.
-        // This avoids 3 String allocations per token (.to_string() on each capture).
-        let match_result = {
-            let rules = self
-                .rule_stack
-                .last()
-                .expect("rule_stack initialized with main rules in Analyzer::new");
-            let mut found = None;
-            for rule in rules {
-                if let Some(captures) = rule.pattern.captures(remaining) {
-                    let match_len = captures
-                        .get(0)
-                        .expect("regex group 0 always exists on match")
-                        .as_str()
-                        .len();
-                    let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
-                    let token_text = captures.get(2).map(|m| m.as_str()).unwrap_or("");
-                    let action = rule.action.clone();
-                    found = Some((match_len, prefix, token_text, action));
-                    break;
-                }
+        // Rules are &'static, so `action` is &'static Action — no borrow on `self`.
+        // `prefix` and `token_text` borrow from `remaining` (borrows `source`, not `self`).
+        // This means we can call `self.execute_action()` without any clone.
+        let rules = self
+            .rule_stack
+            .last()
+            .expect("rule_stack initialized with main rules in Analyzer::new");
+        for rule in *rules {
+            if let Some(captures) = rule.pattern.captures(remaining) {
+                let match_len = captures
+                    .get(0)
+                    .expect("regex group 0 always exists on match")
+                    .as_str()
+                    .len();
+                let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+                let token_text = captures.get(2).map(|m| m.as_str()).unwrap_or("");
+                let action = &rule.action;
+                return self.execute_action(action, match_len, prefix, token_text, source);
             }
-            found
-        };
-
-        match match_result {
-            Some((match_len, prefix, token_text, action)) => {
-                self.execute_action(&action, match_len, prefix, token_text, source)
-            }
-            None => Err(SqlfmtError::Parsing {
-                position: self.pos,
-                message: format!(
-                    "No rule matched near: {:?}",
-                    &remaining[..remaining.len().min(40)]
-                ),
-            }),
         }
+
+        Err(SqlfmtError::Parsing {
+            position: self.pos,
+            message: format!(
+                "No rule matched near: {:?}",
+                &remaining[..remaining.len().min(40)]
+            ),
+        })
     }
 
     /// Dispatch an action based on what the rule matched.
@@ -300,7 +289,7 @@ impl Analyzer {
                 // The new ruleset will re-match the trigger keyword, potentially
                 // with a longer pattern (e.g., "revoke grant option for" in GRANT
                 // ruleset). This mirrors Python sqlfmt's lex_ruleset behavior.
-                let ruleset = match ruleset_name.as_str() {
+                let ruleset = match *ruleset_name {
                     "grant" => crate::rules::grant_rules(),
                     "function" => crate::rules::function_rules(),
                     "warehouse" => crate::rules::warehouse_rules(),
@@ -851,7 +840,7 @@ impl Analyzer {
         Ok(())
     }
 
-    fn push_rules(&mut self, rules: Vec<Rule>) {
+    fn push_rules(&mut self, rules: &'static [Rule]) {
         self.rule_stack.push(rules);
     }
 

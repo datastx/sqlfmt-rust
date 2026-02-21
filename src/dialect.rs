@@ -8,7 +8,7 @@ use crate::rules;
 /// for a specific SQL variant.
 pub trait Dialect: Send + Sync {
     /// Get the lexing rules for this dialect.
-    fn get_rules(&self) -> Vec<Rule>;
+    fn get_rules(&self) -> &'static [Rule];
 
     /// Whether identifiers are case-sensitive.
     fn case_sensitive_names(&self) -> bool {
@@ -27,7 +27,7 @@ pub trait Dialect: Send + Sync {
 pub struct Polyglot;
 
 impl Dialect for Polyglot {
-    fn get_rules(&self) -> Vec<Rule> {
+    fn get_rules(&self) -> &'static [Rule] {
         rules::main_rules()
     }
 }
@@ -38,7 +38,7 @@ impl Dialect for Polyglot {
 pub struct ClickHouse;
 
 impl Dialect for ClickHouse {
-    fn get_rules(&self) -> Vec<Rule> {
+    fn get_rules(&self) -> &'static [Rule] {
         rules::main_rules()
     }
 }
@@ -48,7 +48,7 @@ impl Dialect for ClickHouse {
 pub struct DuckDb;
 
 impl Dialect for DuckDb {
-    fn get_rules(&self) -> Vec<Rule> {
+    fn get_rules(&self) -> &'static [Rule] {
         rules::main_rules()
     }
 }

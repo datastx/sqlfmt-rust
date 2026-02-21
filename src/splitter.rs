@@ -21,9 +21,10 @@ impl LineSplitter {
     /// Split a single line into multiple lines based on SQL structure.
     /// This always splits — it does not check line length first.
     /// The Python splitter also always splits (length checking is done by the merger).
-    pub fn maybe_split(&self, line: &Line, arena: &mut Vec<Node>) -> Vec<Line> {
+    /// Takes ownership of the line to avoid cloning in common paths.
+    pub fn maybe_split(&self, line: Line, arena: &mut Vec<Node>) -> Vec<Line> {
         if line.has_formatting_disabled() {
-            return vec![line.clone()];
+            return vec![line];
         }
 
         let mut new_lines: Vec<Line> = Vec::new();
@@ -42,10 +43,10 @@ impl LineSplitter {
 
             if node.is_newline() {
                 if head == 0 {
-                    new_lines.push(line.clone());
+                    new_lines.push(line);
                 } else {
                     let (new_line, _remaining_comments) =
-                        self.split_at_index(line, head, i, &comments, true, arena);
+                        self.split_at_index(&line, head, i, &comments, true, arena);
                     new_lines.push(new_line);
                 }
                 return new_lines;
@@ -55,7 +56,7 @@ impl LineSplitter {
                 && (always_split_after || self.maybe_split_before(node_idx, arena))
             {
                 let (new_line, remaining_comments) =
-                    self.split_at_index(line, head, i, &comments, false, arena);
+                    self.split_at_index(&line, head, i, &comments, false, arena);
                 comments = remaining_comments;
                 new_lines.push(new_line);
                 head = i;
@@ -67,7 +68,7 @@ impl LineSplitter {
         }
 
         let (new_line, _remaining_comments) =
-            self.split_at_index(line, head, line.nodes.len(), &comments, true, arena);
+            self.split_at_index(&line, head, line.nodes.len(), &comments, true, arena);
         new_lines.push(new_line);
         new_lines
     }
@@ -345,7 +346,7 @@ mod tests {
         line.append_node(nl);
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert_eq!(result.len(), 1);
     }
 
@@ -362,7 +363,7 @@ mod tests {
         line.nodes = vec![select, name, from, table, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected at least 2 lines, got {}",
@@ -382,7 +383,7 @@ mod tests {
         line.nodes = vec![a, comma, b, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected at least 2 lines, got {}",
@@ -402,7 +403,7 @@ mod tests {
         line.nodes = vec![a, op, b, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected split before operator, got {} lines",
@@ -422,7 +423,7 @@ mod tests {
         line.nodes = vec![open, name, close, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected split at brackets, got {} lines",
@@ -442,7 +443,7 @@ mod tests {
         line.nodes = vec![select, one, semi, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected split before semicolon, got {} lines",
@@ -463,7 +464,7 @@ mod tests {
         line.nodes = vec![name, open, star, close, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected split after open bracket, got {} lines",
@@ -503,7 +504,7 @@ mod tests {
         line.formatting_disabled.push(0);
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert_eq!(result.len(), 1);
     }
 
@@ -519,7 +520,7 @@ mod tests {
         line.nodes = vec![one, union, two, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Expected split at set operator, got {} lines",
@@ -536,7 +537,7 @@ mod tests {
         line.append_node(nl);
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert_eq!(result.len(), 1);
         assert!(result[0].is_blank_line(&arena));
     }
@@ -564,7 +565,7 @@ mod tests {
         ];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Should split at bracket boundaries, got {} lines",
@@ -597,7 +598,7 @@ mod tests {
         line.nodes = nodes;
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(result.len() > 1, "500 comma-separated names should split");
     }
 
@@ -615,7 +616,7 @@ mod tests {
         line.nodes = vec![select, name, from, table, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Should split at keyword, got {} lines",
@@ -637,7 +638,7 @@ mod tests {
         line.nodes = vec![comment, name, comma, name2, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         // Should split at comma
         assert!(
             result.len() >= 2,
@@ -659,7 +660,7 @@ mod tests {
         line.nodes = vec![one, union, two, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Should split at UNION ALL, got {} lines",
@@ -695,7 +696,7 @@ mod tests {
         line.nodes = vec![one, plus, comment, two, nl];
 
         let splitter = LineSplitter::new();
-        let result = splitter.maybe_split(&line, &mut arena);
+        let result = splitter.maybe_split(line, &mut arena);
         assert!(
             result.len() >= 2,
             "Should split around operator/comment, got {} lines",

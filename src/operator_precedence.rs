@@ -23,6 +23,25 @@ pub enum OperatorPrecedence {
     On = 14,
 }
 
+/// Compare two strings case-insensitively with whitespace normalization,
+/// without allocating. Returns true if the words in `input` match `target`
+/// when compared case-insensitively and with whitespace collapsed.
+fn eq_ignore_case_ws(input: &str, target: &str) -> bool {
+    let mut input_words = input.split_ascii_whitespace();
+    let mut target_words = target.split_ascii_whitespace();
+    loop {
+        match (input_words.next(), target_words.next()) {
+            (Some(a), Some(b)) => {
+                if !a.eq_ignore_ascii_case(b) {
+                    return false;
+                }
+            }
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
+
 impl OperatorPrecedence {
     /// The 7 tier boundaries used for merge decisions.
     pub fn tiers() -> &'static [OperatorPrecedence] {
@@ -43,12 +62,14 @@ impl OperatorPrecedence {
             TokenType::DoubleColon => Self::DoubleColon,
             TokenType::On => Self::On,
             TokenType::BooleanOperator => {
-                let lower = node.value.to_ascii_lowercase();
-                match lower.as_str() {
-                    "and" => Self::BoolAnd,
-                    "or" => Self::BoolOr,
-                    "not" => Self::BoolNot,
-                    _ => Self::Other,
+                if node.value.eq_ignore_ascii_case("and") {
+                    Self::BoolAnd
+                } else if node.value.eq_ignore_ascii_case("or") {
+                    Self::BoolOr
+                } else if node.value.eq_ignore_ascii_case("not") {
+                    Self::BoolNot
+                } else {
+                    Self::Other
                 }
             }
             TokenType::WordOperator => Self::from_word_operator(&node.value),
@@ -59,31 +80,66 @@ impl OperatorPrecedence {
         }
     }
 
+    /// Classify a word operator without allocating. Uses case-insensitive
+    /// comparison with whitespace normalization for multi-word operators.
     fn from_word_operator(value: &str) -> Self {
-        let lower = value.to_ascii_lowercase();
-        // Normalize internal whitespace for multi-word operators
-        let normalized: String = lower.split_whitespace().collect::<Vec<_>>().join(" ");
-        match normalized.as_str() {
-            "as" => Self::As,
-            "over" | "within group" | "filter" => Self::OtherTight,
-            "in" | "not in" | "global not in" | "global in" | "like" | "not like" | "like any"
-            | "like all" | "not like any" | "not like all" | "ilike" | "not ilike"
-            | "ilike any" | "ilike all" | "not ilike any" | "not ilike all" | "similar to"
-            | "not similar to" | "regexp" | "not regexp" | "rlike" | "not rlike" => {
-                Self::Membership
-            }
-            "between" | "not between" => Self::Membership,
-            "is"
-            | "is not"
-            | "isnull"
-            | "notnull"
-            | "is distinct from"
-            | "is not distinct from"
-            | "exists"
-            | "not exists" => Self::Presence,
-            "interval" | "some" => Self::Other,
-            _ => Self::Other,
+        // Single-word operators (fast path — simple eq_ignore_ascii_case)
+        if value.eq_ignore_ascii_case("as") {
+            return Self::As;
         }
+        if value.eq_ignore_ascii_case("over")
+            || value.eq_ignore_ascii_case("filter")
+            || eq_ignore_case_ws(value, "within group")
+        {
+            return Self::OtherTight;
+        }
+        if value.eq_ignore_ascii_case("interval") || value.eq_ignore_ascii_case("some") {
+            return Self::Other;
+        }
+
+        // Presence operators
+        if value.eq_ignore_ascii_case("is")
+            || eq_ignore_case_ws(value, "is not")
+            || value.eq_ignore_ascii_case("isnull")
+            || value.eq_ignore_ascii_case("notnull")
+            || eq_ignore_case_ws(value, "is distinct from")
+            || eq_ignore_case_ws(value, "is not distinct from")
+            || value.eq_ignore_ascii_case("exists")
+            || eq_ignore_case_ws(value, "not exists")
+        {
+            return Self::Presence;
+        }
+
+        // Membership operators
+        if value.eq_ignore_ascii_case("in")
+            || eq_ignore_case_ws(value, "not in")
+            || eq_ignore_case_ws(value, "global not in")
+            || eq_ignore_case_ws(value, "global in")
+            || value.eq_ignore_ascii_case("like")
+            || eq_ignore_case_ws(value, "not like")
+            || eq_ignore_case_ws(value, "like any")
+            || eq_ignore_case_ws(value, "like all")
+            || eq_ignore_case_ws(value, "not like any")
+            || eq_ignore_case_ws(value, "not like all")
+            || value.eq_ignore_ascii_case("ilike")
+            || eq_ignore_case_ws(value, "not ilike")
+            || eq_ignore_case_ws(value, "ilike any")
+            || eq_ignore_case_ws(value, "ilike all")
+            || eq_ignore_case_ws(value, "not ilike any")
+            || eq_ignore_case_ws(value, "not ilike all")
+            || eq_ignore_case_ws(value, "similar to")
+            || eq_ignore_case_ws(value, "not similar to")
+            || value.eq_ignore_ascii_case("regexp")
+            || eq_ignore_case_ws(value, "not regexp")
+            || value.eq_ignore_ascii_case("rlike")
+            || eq_ignore_case_ws(value, "not rlike")
+            || value.eq_ignore_ascii_case("between")
+            || eq_ignore_case_ws(value, "not between")
+        {
+            return Self::Membership;
+        }
+
+        Self::Other
     }
 
     fn from_symbol_operator(value: &str) -> Self {

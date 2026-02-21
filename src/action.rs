@@ -2,7 +2,12 @@ use crate::token::TokenType;
 
 /// All possible actions the lexer can take when a rule matches.
 /// Uses enum dispatch for zero-cost abstraction instead of Python closures/partial.
-#[derive(Debug, Clone)]
+///
+/// Inner actions use `&'static Action` instead of `Box<Action>` because all rules
+/// are constructed once in `LazyLock` statics and live for the entire program.
+/// This eliminates heap allocation for every nested action and removes the need
+/// to clone actions on each token match in the lexer hot path.
+#[derive(Debug)]
 pub enum Action {
     /// Add a node of the given type to the buffer.
     AddNode { token_type: TokenType },
@@ -29,10 +34,10 @@ pub enum Action {
     HandleNumber,
 
     /// Reserved keyword: check if preceded by DOT (then treat as NAME).
-    HandleReservedKeyword { inner: Box<Action> },
+    HandleReservedKeyword { inner: &'static Action },
 
     /// Non-reserved top-level keyword: check bracket depth.
-    HandleNonreservedTopLevelKeyword { inner: Box<Action> },
+    HandleNonreservedTopLevelKeyword { inner: &'static Action },
 
     /// Handle SET operators (UNION, INTERSECT, EXCEPT, MINUS).
     HandleSetOperator,
@@ -61,5 +66,5 @@ pub enum Action {
     HandleKeywordBeforeParen { token_type: TokenType },
 
     /// Lex with an alternate ruleset (for nested constructs like CREATE FUNCTION body).
-    LexRuleset { ruleset_name: String },
+    LexRuleset { ruleset_name: &'static str },
 }
