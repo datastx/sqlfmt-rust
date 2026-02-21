@@ -1,0 +1,141 @@
+# sqlfmt
+
+An opinionated SQL formatter written in Rust. Ported from [Python sqlfmt](https://github.com/tconbeer/sqlfmt), optimized for Snowflake and DuckDB.
+
+## Installation
+
+### Download a prebuilt binary
+
+Prebuilt binaries are available for Linux and macOS from
+[GitHub Releases](https://github.com/datastx/sqlfmt-rust/releases/latest).
+
+**Linux (x86_64):**
+
+```bash
+curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-x86_64-unknown-linux-musl.tar.gz \
+  | tar xz
+sudo mv sqlfmt-v0.1.0-x86_64-unknown-linux-musl/sqlfmt /usr/local/bin/
+```
+
+**Linux (aarch64 / ARM64):**
+
+```bash
+curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-aarch64-unknown-linux-musl.tar.gz \
+  | tar xz
+sudo mv sqlfmt-v0.1.0-aarch64-unknown-linux-musl/sqlfmt /usr/local/bin/
+```
+
+**macOS (Apple Silicon):**
+
+```bash
+curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-aarch64-apple-darwin.tar.gz \
+  | tar xz
+sudo mv sqlfmt-v0.1.0-aarch64-apple-darwin/sqlfmt /usr/local/bin/
+```
+
+**macOS (Intel):**
+
+```bash
+curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-x86_64-apple-darwin.tar.gz \
+  | tar xz
+sudo mv sqlfmt-v0.1.0-x86_64-apple-darwin/sqlfmt /usr/local/bin/
+```
+
+### Verify the download
+
+Each release includes a `checksums-sha256.txt` file. After downloading, verify:
+
+```bash
+sha256sum -c checksums-sha256.txt
+```
+
+### Build from source
+
+Requires [Rust](https://rustup.rs/) 1.70+.
+
+```bash
+git clone https://github.com/datastx/sqlfmt-rust.git
+cd sqlfmt-rust
+cargo install --path .
+```
+
+## Usage
+
+Format files or directories in place:
+
+```bash
+sqlfmt .
+sqlfmt queries/
+sqlfmt path/to/query.sql
+```
+
+Read from stdin, write to stdout:
+
+```bash
+echo "SELECT   a,b FROM t WHERE x=1" | sqlfmt -
+```
+
+Check formatting without modifying files (exit code 1 if changes needed):
+
+```bash
+sqlfmt --check .
+```
+
+Show a diff of what would change:
+
+```bash
+sqlfmt --diff .
+```
+
+### Options
+
+```
+Usage: sqlfmt [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...  Files or directories to format. Use "-" to read from stdin
+
+Options:
+  -l, --line-length <N>       Maximum line length [default: 88]
+  -d, --dialect <DIALECT>     SQL dialect: polyglot, duckdb, clickhouse [default: polyglot]
+      --check                 Check formatting without writing changes
+      --diff                  Show formatting diff
+      --fast                  Skip safety equivalence check (faster)
+      --no-jinjafmt           Disable Jinja template formatting
+      --exclude <PATTERN>     Glob patterns to exclude
+  -t, --threads <N>           Number of threads (0 = all cores) [default: 0]
+      --single-process        Disable multi-threaded processing
+  -v, --verbose               Verbose output
+  -q, --quiet                 Quiet output (errors only)
+      --no-progressbar        Disable progress bar
+      --config <PATH>         Path to config file (pyproject.toml or sqlfmt.toml)
+  -h, --help                  Print help
+  -V, --version               Print version
+```
+
+### Configuration file
+
+sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pyproject.toml`:
+
+```toml
+# sqlfmt.toml
+line_length = 100
+dialect = "duckdb"
+exclude = ["migrations/**"]
+threads = 4
+```
+
+## Supported platforms
+
+| Platform             | Architecture | Binary target                    |
+| -------------------- | ------------ | -------------------------------- |
+| Linux                | x86_64       | `x86_64-unknown-linux-musl`      |
+| Linux                | aarch64      | `aarch64-unknown-linux-musl`     |
+| macOS (Apple Silicon)| aarch64      | `aarch64-apple-darwin`           |
+| macOS (Intel)        | x86_64       | `x86_64-apple-darwin`            |
+
+Linux binaries are statically linked (musl) and have no runtime dependencies.
+
+## License
+
+Apache-2.0

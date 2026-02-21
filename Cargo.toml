@@ -1,0 +1,54 @@
+[package]
+name = "sqlfmt"
+version = "0.1.0"
+edition = "2021"
+description = "An opinionated SQL formatter, ported from Python sqlfmt. Optimized for Snowflake and DuckDB."
+license = "Apache-2.0"
+
+[[bin]]
+name = "sqlfmt"
+path = "src/main.rs"
+
+[lib]
+name = "sqlfmt"
+path = "src/lib.rs"
+
+[dependencies]
+regex = "1"
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+rayon = "1"
+indicatif = "0.17"
+similar = "2"
+dirs = "6"
+glob = "0.3"
+globset = "0.4"
+termcolor = "1"
+smallvec = { version = "1", features = ["union"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
+insta = "1"
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "format_bench"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# Optimize dependencies in test/dev builds for much faster regex execution
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test.package."*"]
+opt-level = 2
