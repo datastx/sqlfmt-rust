@@ -60,6 +60,10 @@ impl Analyzer {
         self.clear_buffers();
         // Pre-allocate arena: ~1 node per 6 source bytes avoids repeated reallocations
         self.arena.reserve(source.len() / 6);
+        // Pre-allocate line_buffer based on newline count to avoid Vec growth
+        let estimated_lines = memchr::memchr_iter(b'\n', source.as_bytes()).count();
+        self.line_buffer.reserve(estimated_lines + 1);
+        self.node_buffer.reserve(32);
         self.lex(source)?;
         self.flush_line_buffer();
         self.validate_brackets()?;
@@ -587,7 +591,7 @@ impl Analyzer {
             let mut line = Line::new(prev);
             line.append_node(idx);
             if !self.arena[idx].formatting_disabled.is_empty() {
-                line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
+                line.formatting_disabled = true;
             }
             self.line_buffer.push(line);
             return;
@@ -607,7 +611,7 @@ impl Analyzer {
 
         for &idx in &self.node_buffer {
             if !self.arena[idx].formatting_disabled.is_empty() {
-                line.formatting_disabled = self.arena[idx].formatting_disabled.clone();
+                line.formatting_disabled = true;
                 break;
             }
         }

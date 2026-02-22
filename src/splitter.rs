@@ -498,7 +498,7 @@ mod tests {
 
         let mut line = Line::new(None);
         line.nodes = vec![a, op, b, nl];
-        line.formatting_disabled.push(0);
+        line.formatting_disabled = true;
 
         let splitter = LineSplitter::new();
         let result = splitter.maybe_split(line, &mut arena);

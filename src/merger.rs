@@ -870,7 +870,7 @@ mod tests {
         let mut disabled_line = Line::new(None);
         disabled_line.append_node(a);
         disabled_line.append_node(nl);
-        disabled_line.formatting_disabled.push(0);
+        disabled_line.formatting_disabled = true;
 
         let merger = LineMerger::new(88);
         let result = merger.maybe_merge_lines(&[disabled_line], &arena);

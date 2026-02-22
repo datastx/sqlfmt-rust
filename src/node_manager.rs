@@ -11,9 +11,17 @@ use crate::token::{Token, TokenType};
 #[derive(Debug, Clone)]
 pub struct NodeManager {
     pub case_sensitive_names: bool,
+    /// Filtered brackets (no unterm keywords) — used by actions like HandleNonreservedTopLevelKeyword.
     pub open_brackets: BracketVec,
+    /// Current jinja block stack — used by handle_jinja_block_keyword etc.
     pub open_jinja_blocks: JinjaBlockVec,
     pub formatting_disabled: FmtDisabledVec,
+    /// Running node-level brackets (including unterm keywords). Mutated in place
+    /// to avoid cloning from arena on every node creation.
+    node_open_brackets: BracketVec,
+    /// Running node-level jinja block stack. Separate from open_jinja_blocks
+    /// because external push/pop calls can temporarily diverge them.
+    node_open_jinja: JinjaBlockVec,
 }
 
 impl NodeManager {
@@ -23,6 +31,8 @@ impl NodeManager {
             open_brackets: SmallVec::new(),
             open_jinja_blocks: SmallVec::new(),
             formatting_disabled: SmallVec::new(),
+            node_open_brackets: SmallVec::new(),
+            node_open_jinja: SmallVec::new(),
         }
     }
 
@@ -75,13 +85,16 @@ impl NodeManager {
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> (BracketVec, JinjaBlockVec) {
-        let (mut node_brackets, mut node_jinja) = match previous_node {
-            None => (SmallVec::new(), SmallVec::new()),
+        // Mutate running state in place instead of cloning from arena each time.
+        // self.node_open_brackets always equals the previous node's open_brackets
+        // at this point (set at end of previous call).
+        match previous_node {
+            None => {
+                self.node_open_brackets.clear();
+                self.node_open_jinja.clear();
+            }
             Some(prev_idx) => {
                 let prev = &arena[prev_idx];
-                let mut ob = prev.open_brackets.clone();
-                let mut oj = prev.open_jinja_blocks.clone();
-
                 // LATERAL is an unterm keyword for splitting but does NOT
                 // increase depth for the next node — it's a FROM clause
                 // modifier, not a clause-level keyword.
@@ -89,13 +102,11 @@ impl NodeManager {
                     let is_lateral_kw =
                         prev.is_unterm_keyword() && prev.value.eq_ignore_ascii_case("lateral");
                     if !is_lateral_kw {
-                        ob.push(prev_idx);
+                        self.node_open_brackets.push(prev_idx);
                     }
                 } else if prev.is_opening_jinja_block() {
-                    oj.push(prev_idx);
+                    self.node_open_jinja.push(prev_idx);
                 }
-
-                (ob, oj)
             }
         };
 
@@ -105,40 +116,41 @@ impl NodeManager {
                 // within the FROM clause, not a replacement for FROM.
                 let is_lateral = token.text.eq_ignore_ascii_case("lateral");
                 if !is_lateral {
-                    if let Some(last) = node_brackets.last() {
+                    if let Some(last) = self.node_open_brackets.last() {
                         if arena[*last].is_unterm_keyword() {
-                            node_brackets.pop();
+                            self.node_open_brackets.pop();
                         }
                     }
                 }
             }
             TokenType::BracketClose | TokenType::StatementEnd => {
-                while let Some(last) = node_brackets.last() {
+                while let Some(last) = self.node_open_brackets.last() {
                     if arena[*last].is_unterm_keyword() {
-                        node_brackets.pop();
+                        self.node_open_brackets.pop();
                     } else {
                         break;
                     }
                 }
-                node_brackets.pop();
+                self.node_open_brackets.pop();
             }
             TokenType::JinjaBlockEnd => {
                 // Pop the jinja block and restore SQL brackets to the state
                 // at the time the jinja block was opened. SQL scope inside a
                 // jinja block doesn't leak out to the closing tag.
-                if let Some(jinja_start_idx) = node_jinja.pop() {
-                    node_brackets = arena[jinja_start_idx].open_brackets.clone();
+                // Must clone from arena here — rare path (only jinja blocks).
+                if let Some(jinja_start_idx) = self.node_open_jinja.pop() {
+                    self.node_open_brackets = arena[jinja_start_idx].open_brackets.clone();
                 }
             }
             TokenType::JinjaBlockKeyword => {
                 // {% else %}, {% elif %}, etc. close the previous block section
                 // and open a new one. Restore SQL brackets to the block start's state.
-                if let Some(jinja_start_idx) = node_jinja.pop() {
-                    node_brackets = arena[jinja_start_idx].open_brackets.clone();
+                if let Some(jinja_start_idx) = self.node_open_jinja.pop() {
+                    self.node_open_brackets = arena[jinja_start_idx].open_brackets.clone();
                 }
             }
             TokenType::Semicolon => {
-                node_brackets.clear();
+                self.node_open_brackets.clear();
             }
             _ => {}
         }
@@ -146,47 +158,50 @@ impl NodeManager {
         // NodeManager's open_brackets: ONLY actual brackets, not unterm keywords.
         // This is used by HandleNonreservedTopLevelKeyword to decide if FROM/USING
         // should be treated as keywords or names.
-        self.open_brackets = node_brackets
+        self.open_brackets = self
+            .node_open_brackets
             .iter()
             .filter(|&&idx| !arena[idx].is_unterm_keyword())
             .copied()
             .collect();
-        self.open_jinja_blocks = node_jinja.clone();
+        self.open_jinja_blocks = self.node_open_jinja.clone();
 
-        (node_brackets, node_jinja)
+        (
+            self.node_open_brackets.clone(),
+            self.node_open_jinja.clone(),
+        )
     }
 
     /// Compute formatting_disabled state from previous node.
+    /// Uses self.formatting_disabled as running state, mutating in place
+    /// instead of cloning from arena each time.
     fn compute_formatting_disabled(
         &mut self,
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
     ) -> FmtDisabledVec {
-        let mut formatting_disabled = match previous_node {
-            None => SmallVec::new(),
-            Some(prev_idx) => arena[prev_idx].formatting_disabled.clone(),
-        };
+        if previous_node.is_none() {
+            self.formatting_disabled.clear();
+        }
 
         if matches!(token.token_type, TokenType::FmtOff | TokenType::Data) {
             // Push a marker index (the value doesn't matter, only non-emptiness is checked)
-            formatting_disabled.push(previous_node.unwrap_or(0));
+            self.formatting_disabled.push(previous_node.unwrap_or(0));
         }
 
-        if !formatting_disabled.is_empty() {
+        if !self.formatting_disabled.is_empty() {
             if let Some(prev_idx) = previous_node {
                 if matches!(
                     arena[prev_idx].token.token_type,
                     TokenType::FmtOn | TokenType::Data
                 ) {
-                    formatting_disabled.pop();
+                    self.formatting_disabled.pop();
                 }
             }
         }
 
-        self.formatting_disabled = formatting_disabled.clone();
-
-        formatting_disabled
+        self.formatting_disabled.clone()
     }
 
     /// Open a bracket (called after node is added to arena with its index).
@@ -500,6 +515,10 @@ impl NodeManager {
     }
 
     /// Reset state (for new query).
+    /// Only clears NodeManager-level state (filtered brackets, jinja blocks used
+    /// by handle_* methods). Does NOT clear node_open_brackets/node_open_jinja
+    /// because they track the running node-level state and the next
+    /// compute_open_brackets will maintain them from the previous arena node.
     pub fn reset(&mut self) {
         self.open_brackets.clear();
         self.open_jinja_blocks.clear();
