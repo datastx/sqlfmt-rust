@@ -42,7 +42,7 @@ impl Line {
     pub fn new(previous_node: Option<NodeIndex>) -> Self {
         Self {
             previous_node,
-            nodes: Vec::new(),
+            nodes: Vec::with_capacity(4),
             comments: Vec::new(),
             formatting_disabled: false,
         }
