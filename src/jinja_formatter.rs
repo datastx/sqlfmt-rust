@@ -1,3 +1,5 @@
+use compact_str::CompactString;
+
 use crate::line::{indent_str, Line};
 use crate::node::Node;
 use crate::string_utils::{skip_string_literal, skip_string_literal_into};
@@ -26,7 +28,7 @@ impl JinjaFormatter {
                 TokenType::JinjaExpression => {
                     let value = node.value.clone();
                     if let Some(normalized) = self.normalize_expression(&value) {
-                        arena[idx].value = normalized;
+                        arena[idx].value = CompactString::from(normalized);
                     }
                 }
                 TokenType::JinjaStatement
@@ -35,7 +37,7 @@ impl JinjaFormatter {
                 | TokenType::JinjaBlockKeyword => {
                     let value = node.value.clone();
                     if let Some(normalized) = self.normalize_statement(&value) {
-                        arena[idx].value = normalized;
+                        arena[idx].value = CompactString::from(normalized);
                     }
                 }
                 _ => {}
@@ -58,7 +60,7 @@ impl JinjaFormatter {
                     if let Some(multiline) =
                         self.format_expression_multiline(&node.value, base_indent)
                     {
-                        arena[idx].value = multiline;
+                        arena[idx].value = CompactString::from(multiline);
                     }
                 }
                 TokenType::JinjaStatement
@@ -68,7 +70,7 @@ impl JinjaFormatter {
                     if let Some(multiline) =
                         self.format_statement_multiline(&node.value, base_indent)
                     {
-                        arena[idx].value = multiline;
+                        arena[idx].value = CompactString::from(multiline);
                     }
                 }
                 _ => {}

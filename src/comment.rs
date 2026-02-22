@@ -139,7 +139,7 @@ mod tests {
 
     fn make_comment(text: &str, standalone: bool) -> Comment {
         Comment::new(
-            Token::new(TokenType::Comment, "", text, 0, text.len()),
+            Token::new(TokenType::Comment, "", text, 0, text.len() as u32),
             standalone,
             None,
         )

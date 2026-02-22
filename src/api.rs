@@ -13,7 +13,7 @@ use crate::string_utils::skip_string_literal_into;
 #[derive(Debug, Clone)]
 struct TokenSnapshot {
     token_type: crate::token::TokenType,
-    text: String,
+    text: compact_str::CompactString,
 }
 
 /// Format a SQL string according to the given mode.

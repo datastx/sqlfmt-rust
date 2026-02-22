@@ -164,10 +164,10 @@ mod tests {
 
     fn make_node(tt: TokenType, value: &str) -> Node {
         Node::new(
-            Token::new(tt, "", value, 0, value.len()),
+            Token::new(tt, "", value, 0, value.len() as u32),
             None,
-            String::new(),
-            value.to_string(),
+            compact_str::CompactString::new(""),
+            compact_str::CompactString::from(value),
             smallvec::SmallVec::new(),
             smallvec::SmallVec::new(),
         )

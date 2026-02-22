@@ -1,3 +1,4 @@
+use compact_str::CompactString;
 use smallvec::SmallVec;
 
 use crate::token::{Token, TokenType};
@@ -17,8 +18,8 @@ pub type FmtDisabledVec = SmallVec<[NodeIndex; 2]>;
 pub struct Node {
     pub token: Token,
     pub previous_node: Option<NodeIndex>,
-    pub prefix: String,
-    pub value: String,
+    pub prefix: CompactString,
+    pub value: CompactString,
     pub open_brackets: BracketVec,
     pub open_jinja_blocks: JinjaBlockVec,
     pub formatting_disabled: FmtDisabledVec,
@@ -28,8 +29,8 @@ impl Node {
     pub fn new(
         token: Token,
         previous_node: Option<NodeIndex>,
-        prefix: String,
-        value: String,
+        prefix: CompactString,
+        value: CompactString,
         open_brackets: BracketVec,
         open_jinja_blocks: JinjaBlockVec,
     ) -> Self {
@@ -266,10 +267,10 @@ mod tests {
 
     fn make_node(token_type: TokenType, value: &str, prev: Option<NodeIndex>) -> Node {
         Node::new(
-            Token::new(token_type, "", value, 0, value.len()),
+            Token::new(token_type, "", value, 0, value.len() as u32),
             prev,
-            String::new(),
-            value.to_string(),
+            CompactString::new(""),
+            CompactString::from(value),
             SmallVec::new(),
             SmallVec::new(),
         )
@@ -292,7 +293,7 @@ mod tests {
     #[test]
     fn test_formatted_string() {
         let mut node = make_node(TokenType::Name, "foo", None);
-        node.prefix = " ".to_string();
+        node.prefix = CompactString::from(" ");
         assert_eq!(node.to_formatted_string(), " foo");
         assert_eq!(node.len(), 4);
     }
@@ -346,27 +347,27 @@ mod tests {
         let mut arena = Vec::new();
         arena.push(make_node(TokenType::Name, "arr", None));
         let mut bracket = make_node(TokenType::BracketOpen, "[", Some(0));
-        bracket.value = "[".to_string();
+        bracket.value = CompactString::from("[");
         assert!(bracket.is_bracket_operator(&arena));
 
         // Square bracket after QuotedName => bracket operator
         let mut arena2 = Vec::new();
         arena2.push(make_node(TokenType::QuotedName, "\"my_col\"", None));
         let mut bracket2 = make_node(TokenType::BracketOpen, "[", Some(0));
-        bracket2.value = "[".to_string();
+        bracket2.value = CompactString::from("[");
         assert!(bracket2.is_bracket_operator(&arena2));
 
         // Square bracket after BracketClose => bracket operator
         let mut arena3 = Vec::new();
         arena3.push(make_node(TokenType::BracketClose, "]", None));
         let mut bracket3 = make_node(TokenType::BracketOpen, "[", Some(0));
-        bracket3.value = "[".to_string();
+        bracket3.value = CompactString::from("[");
         assert!(bracket3.is_bracket_operator(&arena3));
 
         // Square bracket with no previous node => NOT bracket operator
         let arena4: Vec<Node> = Vec::new();
         let mut bracket4 = make_node(TokenType::BracketOpen, "[", None);
-        bracket4.value = "[".to_string();
+        bracket4.value = CompactString::from("[");
         assert!(!bracket4.is_bracket_operator(&arena4));
     }
 
@@ -435,7 +436,7 @@ mod tests {
         let mut node = make_node(TokenType::JinjaExpression, "{{ foo }}", None);
         assert!(!node.is_multiline_jinja());
 
-        node.value = "{{ foo\n  bar }}".to_string();
+        node.value = CompactString::from("{{ foo\n  bar }}");
         assert!(node.is_multiline_jinja());
     }
 

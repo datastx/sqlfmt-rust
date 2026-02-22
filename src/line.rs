@@ -465,10 +465,10 @@ mod tests {
         let idx = arena.len();
         let prev = if idx > 0 { Some(idx - 1) } else { None };
         arena.push(Node::new(
-            Token::new(token_type, "", value, 0, value.len()),
+            Token::new(token_type, "", value, 0, value.len() as u32),
             prev,
-            prefix.to_string(),
-            value.to_string(),
+            compact_str::CompactString::from(prefix),
+            compact_str::CompactString::from(value),
             smallvec::SmallVec::new(),
             smallvec::SmallVec::new(),
         ));

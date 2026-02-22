@@ -168,10 +168,10 @@ mod tests {
     fn make_node(arena: &mut Vec<Node>, tt: TokenType, val: &str) -> usize {
         let idx = arena.len();
         arena.push(Node::new(
-            Token::new(tt, "", val, 0, val.len()),
+            Token::new(tt, "", val, 0, val.len() as u32),
             if idx > 0 { Some(idx - 1) } else { None },
-            String::new(),
-            val.to_string(),
+            compact_str::CompactString::new(""),
+            compact_str::CompactString::from(val),
             smallvec::SmallVec::new(),
             smallvec::SmallVec::new(),
         ));

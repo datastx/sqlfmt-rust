@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use compact_str::CompactString;
 use smallvec::SmallVec;
 
 use crate::node::{BracketVec, FmtDisabledVec, JinjaBlockVec, Node, NodeIndex};
@@ -43,11 +44,12 @@ impl NodeManager {
         let (prefix, value) = if !formatting_disabled.is_empty() {
             (token.prefix.clone(), token.text.clone())
         } else {
-            let prefix = self
-                .compute_prefix(&token, previous_node, arena)
-                .into_owned();
-            let value = self.standardize_value(&token).into_owned();
-            (prefix, value)
+            let prefix_cow = self.compute_prefix(&token, previous_node, arena);
+            let value_cow = self.standardize_value(&token);
+            (
+                CompactString::from(prefix_cow.as_ref()),
+                CompactString::from(value_cow.as_ref()),
+            )
         };
 
         Node {
@@ -440,10 +442,10 @@ impl NodeManager {
             if !token.text.contains(|c: char| c.is_ascii_whitespace())
                 && token.text.bytes().all(|b| !b.is_ascii_uppercase())
             {
-                return Cow::Borrowed(&token.text);
+                return Cow::Borrowed(&*token.text);
             }
             // Use optimized bulk lowercase, then normalize whitespace without Vec
-            let lower = token.text.to_ascii_lowercase();
+            let lower = str::to_ascii_lowercase(&token.text);
             if !lower.contains(|c: char| c.is_ascii_whitespace()) {
                 return Cow::Owned(lower);
             }
@@ -459,24 +461,24 @@ impl NodeManager {
 
         if tt == TokenType::Number {
             if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
-                return Cow::Borrowed(&token.text);
+                return Cow::Borrowed(&*token.text);
             }
-            return Cow::Owned(token.text.to_ascii_lowercase());
+            return Cow::Owned(str::to_ascii_lowercase(&token.text));
         }
 
         if !self.case_sensitive_names && tt == TokenType::Name {
             let first = token.text.as_bytes().first().copied();
             if matches!(first, Some(b'\'') | Some(b'$')) {
-                return Cow::Borrowed(&token.text);
+                return Cow::Borrowed(&*token.text);
             }
             if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
-                return Cow::Borrowed(&token.text);
+                return Cow::Borrowed(&*token.text);
             }
-            return Cow::Owned(token.text.to_ascii_lowercase());
+            return Cow::Owned(str::to_ascii_lowercase(&token.text));
         }
 
         // Jinja tokens, quoted names, etc.: preserve original text
-        Cow::Borrowed(&token.text)
+        Cow::Borrowed(&*token.text)
     }
 
     /// Enable formatting (handle fmt:on).
@@ -626,7 +628,7 @@ mod tests {
             (TokenType::SetOperator, "UNION ALL", "union all"),
         ];
         for (tt, input, expected) in operators {
-            let token = Token::new(tt, "", input, 0, input.len());
+            let token = Token::new(tt, "", input, 0, input.len() as u32);
             assert_eq!(
                 nm.standardize_value(&token),
                 expected,
@@ -642,7 +644,7 @@ mod tests {
         let nm = NodeManager::new(false);
         let cases = vec![("0xFF", "0xff"), ("1E10", "1e10"), ("0XAB", "0xab")];
         for (input, expected) in cases {
-            let token = Token::new(TokenType::Number, "", input, 0, input.len());
+            let token = Token::new(TokenType::Number, "", input, 0, input.len() as u32);
             assert_eq!(
                 nm.standardize_value(&token),
                 expected,
@@ -686,7 +688,7 @@ mod tests {
             (TokenType::UntermKeyword, "ORDER    BY", "order by"),
         ];
         for (tt, input, expected) in cases {
-            let token = Token::new(tt, "", input, 0, input.len());
+            let token = Token::new(tt, "", input, 0, input.len() as u32);
             assert_eq!(
                 nm.standardize_value(&token),
                 expected,

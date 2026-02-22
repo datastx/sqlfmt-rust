@@ -1,15 +1,9 @@
 use crate::analyzer::Analyzer;
 use crate::error::SqlfmtError;
 use crate::node_manager::NodeManager;
-use crate::rule::Rule;
-use crate::rules;
 
-/// A SQL dialect defines the set of lexing rules and configuration
-/// for a specific SQL variant.
+/// A SQL dialect defines configuration for a specific SQL variant.
 pub trait Dialect: Send + Sync {
-    /// Get the lexing rules for this dialect.
-    fn get_rules(&self) -> &'static [Rule];
-
     /// Whether identifiers are case-sensitive.
     fn case_sensitive_names(&self) -> bool {
         false
@@ -18,7 +12,7 @@ pub trait Dialect: Send + Sync {
     /// Create an analyzer configured for this dialect.
     fn initialize_analyzer(&self, line_length: usize) -> Analyzer {
         let nm = NodeManager::new(self.case_sensitive_names());
-        Analyzer::new(self.get_rules(), nm, line_length)
+        Analyzer::new(nm, line_length)
     }
 }
 
@@ -26,32 +20,20 @@ pub trait Dialect: Send + Sync {
 /// PostgreSQL, MySQL, BigQuery, and SparkSQL.
 pub struct Polyglot;
 
-impl Dialect for Polyglot {
-    fn get_rules(&self) -> &'static [Rule] {
-        rules::main_rules()
-    }
-}
+impl Dialect for Polyglot {}
 
 /// ClickHouse dialect: same rules as Polyglot.
 /// Note: ClickHouse identifiers are technically case-sensitive at the engine level,
 /// but Python sqlfmt lowercases them like all other dialects.
 pub struct ClickHouse;
 
-impl Dialect for ClickHouse {
-    fn get_rules(&self) -> &'static [Rule] {
-        rules::main_rules()
-    }
-}
+impl Dialect for ClickHouse {}
 
 /// DuckDB dialect: same as Polyglot for now; can be extended with DuckDB-specific
 /// keywords and syntax.
 pub struct DuckDb;
 
-impl Dialect for DuckDb {
-    fn get_rules(&self) -> &'static [Rule] {
-        rules::main_rules()
-    }
-}
+impl Dialect for DuckDb {}
 
 /// Create a dialect from a string name.
 pub fn dialect_from_name(name: &str) -> Result<Box<dyn Dialect>, SqlfmtError> {
@@ -68,10 +50,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_polyglot_rules() {
+    fn test_polyglot() {
         let dialect = Polyglot;
-        let rules = dialect.get_rules();
-        assert!(!rules.is_empty());
         assert!(!dialect.case_sensitive_names());
     }
 
@@ -84,8 +64,7 @@ mod tests {
     #[test]
     fn test_duckdb_dialect() {
         let dialect = DuckDb;
-        let rules = dialect.get_rules();
-        assert!(!rules.is_empty());
+        assert!(!dialect.case_sensitive_names());
     }
 
     #[test]
