@@ -21,9 +21,6 @@ pub enum Action {
     /// Add a comment token.
     AddComment,
 
-    /// Add a Jinja comment and signal end of ruleset.
-    AddJinjaComment,
-
     /// Handle newline: flush node buffer into a Line.
     HandleNewline,
 

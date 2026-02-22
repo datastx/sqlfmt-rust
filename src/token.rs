@@ -1,5 +1,8 @@
-/// Position in source string (byte offset).
-pub type Pos = usize;
+use compact_str::CompactString;
+
+/// Position in source string (byte offset). u32 is sufficient (SQL files < 4GB)
+/// and saves 8 bytes per Token vs usize on 64-bit platforms.
+pub type Pos = u32;
 
 /// All token types recognized by the lexer.
 /// Mirrors Python sqlfmt's TokenType (31 variants).
@@ -145,8 +148,8 @@ impl TokenType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,
-    pub prefix: String,
-    pub text: String,
+    pub prefix: CompactString,
+    pub text: CompactString,
     pub spos: Pos,
     pub epos: Pos,
 }
@@ -155,8 +158,8 @@ impl Token {
     pub fn new(token_type: TokenType, prefix: &str, text: &str, spos: Pos, epos: Pos) -> Self {
         Self {
             token_type,
-            prefix: prefix.to_string(),
-            text: text.to_string(),
+            prefix: CompactString::from(prefix),
+            text: CompactString::from(text),
             spos,
             epos,
         }
@@ -205,11 +208,11 @@ mod tests {
 
     #[test]
     fn test_token_creation() {
-        let tok = Token::new(TokenType::Name, " ", "foo", 5, 8);
+        let tok = Token::new(TokenType::Name, " ", "foo", 5u32, 8u32);
         assert_eq!(tok.token_type, TokenType::Name);
         assert_eq!(tok.prefix, " ");
         assert_eq!(tok.text, "foo");
-        assert_eq!(tok.spos, 5);
-        assert_eq!(tok.epos, 8);
+        assert_eq!(tok.spos, 5u32);
+        assert_eq!(tok.epos, 8u32);
     }
 }

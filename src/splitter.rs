@@ -1,3 +1,5 @@
+use compact_str::CompactString;
+
 use crate::comment::Comment;
 use crate::line::Line;
 use crate::node::{Node, NodeIndex};
@@ -22,17 +24,13 @@ impl LineSplitter {
     /// This always splits — it does not check line length first.
     /// The Python splitter also always splits (length checking is done by the merger).
     /// Takes ownership of the line to avoid cloning in common paths.
-    pub fn maybe_split(&self, line: Line, arena: &mut Vec<Node>) -> Vec<Line> {
+    pub fn maybe_split(&self, mut line: Line, arena: &mut Vec<Node>) -> Vec<Line> {
         if line.has_formatting_disabled() {
             return vec![line];
         }
 
         let mut new_lines: Vec<Line> = Vec::new();
-        let mut comments = if line.comments.is_empty() {
-            Vec::new()
-        } else {
-            line.comments.clone()
-        };
+        let mut comments = std::mem::take(&mut line.comments);
         let mut head: usize = 0;
         let mut always_split_after = false;
         let mut never_split_after = false;
@@ -43,10 +41,11 @@ impl LineSplitter {
 
             if node.is_newline() {
                 if head == 0 {
+                    line.comments = comments;
                     new_lines.push(line);
                 } else {
                     let (new_line, _remaining_comments) =
-                        self.split_at_index(&line, head, i, &comments, true, arena);
+                        self.split_at_index(&line, head, i, comments, true, arena);
                     new_lines.push(new_line);
                 }
                 return new_lines;
@@ -56,7 +55,7 @@ impl LineSplitter {
                 && (always_split_after || self.maybe_split_before(node_idx, arena))
             {
                 let (new_line, remaining_comments) =
-                    self.split_at_index(&line, head, i, &comments, false, arena);
+                    self.split_at_index(&line, head, i, comments, false, arena);
                 comments = remaining_comments;
                 new_lines.push(new_line);
                 head = i;
@@ -68,7 +67,7 @@ impl LineSplitter {
         }
 
         let (new_line, _remaining_comments) =
-            self.split_at_index(&line, head, line.nodes.len(), &comments, true, arena);
+            self.split_at_index(&line, head, line.nodes.len(), comments, true, arena);
         new_lines.push(new_line);
         new_lines
     }
@@ -209,7 +208,7 @@ impl LineSplitter {
         line: &Line,
         head: usize,
         index: usize,
-        comments: &[Comment],
+        comments: Vec<Comment>,
         no_tail: bool,
         arena: &mut Vec<Node>,
     ) -> (Line, Vec<Comment>) {
@@ -220,20 +219,19 @@ impl LineSplitter {
         };
 
         if new_nodes.is_empty() {
-            // Shouldn't happen, but return empty line
             let empty_line = Line::new(line.previous_node);
-            return (empty_line, comments.to_vec());
+            return (empty_line, comments);
         }
 
         // - Inline comments stay with the line containing their previous_node
         // - Standalone comments go to the NEXT line (they describe what follows)
         // - Orphaned comments (previous_node from an earlier split) attach to current head
         let (head_comments, tail_comments) = if no_tail {
-            (comments.to_vec(), Vec::new())
+            (comments, Vec::new())
         } else if comments.is_empty() {
             (Vec::new(), Vec::new())
         } else if new_nodes.len() == 1 && arena[new_nodes[0]].token.token_type == TokenType::Comma {
-            (Vec::new(), comments.to_vec())
+            (Vec::new(), comments)
         } else {
             // Use slice contains() instead of HashSet for small node sets
             let remaining_nodes: &[NodeIndex] = if index < line.nodes.len() {
@@ -253,15 +251,14 @@ impl LineSplitter {
 
                 if prev_in_head {
                     if comment.is_inline() {
-                        head_c.push(comment.clone());
+                        head_c.push(comment);
                     } else {
-                        tail_c.push(comment.clone());
+                        tail_c.push(comment);
                     }
                 } else if prev_in_remaining {
-                    tail_c.push(comment.clone());
+                    tail_c.push(comment);
                 } else {
-                    // Orphaned: previous_node was in an earlier split → attach to head
-                    head_c.push(comment.clone());
+                    head_c.push(comment);
                 }
             }
             (head_c, tail_c)
@@ -295,8 +292,8 @@ impl LineSplitter {
         let nl_node = Node::new(
             nl_token,
             prev_idx,
-            String::new(),
-            "\n".to_string(),
+            CompactString::new(""),
+            CompactString::from("\n"),
             prev_idx
                 .map(|i| arena[i].open_brackets.clone())
                 .unwrap_or_default(),
@@ -325,10 +322,10 @@ mod tests {
         let idx = arena.len();
         let prev = if idx > 0 { Some(idx - 1) } else { None };
         arena.push(Node::new(
-            Token::new(tt, "", val, 0, val.len()),
+            Token::new(tt, "", val, 0, val.len() as u32),
             prev,
-            prefix.to_string(),
-            val.to_string(),
+            CompactString::from(prefix),
+            CompactString::from(val),
             smallvec::SmallVec::new(),
             smallvec::SmallVec::new(),
         ));
@@ -477,7 +474,7 @@ mod tests {
         let mut arena = Vec::new();
         let arr = make_node(&mut arena, TokenType::Name, "arr", "");
         let bracket = make_node(&mut arena, TokenType::BracketOpen, "[", "");
-        arena[bracket].value = "[".to_string();
+        arena[bracket].value = CompactString::from("[");
         let zero = make_node(&mut arena, TokenType::Number, "0", "");
         let close = make_node(&mut arena, TokenType::BracketClose, "]", "");
         let nl = make_node(&mut arena, TokenType::Newline, "\n", "");

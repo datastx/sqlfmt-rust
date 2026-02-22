@@ -1,3 +1,5 @@
+use compact_str::CompactString;
+
 use crate::jinja_formatter::JinjaFormatter;
 use crate::line::Line;
 use crate::merger::LineMerger;
@@ -258,8 +260,8 @@ fn split_line_at_jinja(line: Line, split_pos: usize, arena: &mut Vec<Node>) -> (
     let nl_node = Node::new(
         nl_token,
         prev_idx,
-        String::new(),
-        "\n".to_string(),
+        CompactString::new(""),
+        CompactString::from("\n"),
         prev_idx
             .map(|i| arena[i].open_brackets.clone())
             .unwrap_or_default(),
@@ -340,12 +342,10 @@ mod tests {
     use super::*;
     use crate::analyzer::Analyzer;
     use crate::node_manager::NodeManager;
-    use crate::rules;
 
     fn format_sql(source: &str) -> (Query, Vec<Node>) {
-        let rules = rules::main_rules();
         let nm = NodeManager::new(false);
-        let mut analyzer = Analyzer::new(rules, nm, 88);
+        let mut analyzer = Analyzer::new(nm, 88);
         let mut query = analyzer.parse_query(source).unwrap();
         let mut arena = std::mem::take(&mut analyzer.arena);
 

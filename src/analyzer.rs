@@ -1,22 +1,24 @@
+use memchr::memchr;
+
 use crate::action::Action;
 use crate::comment::Comment;
 use crate::error::SqlfmtError;
+use crate::lexer::{self, LexState};
 use crate::line::Line;
 use crate::node::{Node, NodeIndex};
 use crate::node_manager::NodeManager;
 use crate::query::Query;
-use crate::rule::Rule;
 use crate::string_utils::skip_string_literal;
 use crate::token::{Token, TokenType};
 
-/// The regex-based lexer. Parses SQL source strings into Queries.
-/// Maintains buffers and a rule stack for nested lexing contexts.
+/// The byte-dispatch lexer. Parses SQL source strings into Queries.
+/// Maintains buffers and a lex state stack for nested lexing contexts.
 pub struct Analyzer {
     pub line_length: usize,
     pub node_manager: NodeManager,
     pub arena: Vec<Node>,
 
-    rule_stack: Vec<&'static [Rule]>,
+    lex_state: Vec<LexState>,
     node_buffer: Vec<NodeIndex>,
     comment_buffer: Vec<Comment>,
     line_buffer: Vec<Line>,
@@ -36,11 +38,11 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new(rules: &'static [Rule], node_manager: NodeManager, line_length: usize) -> Self {
+    pub fn new(node_manager: NodeManager, line_length: usize) -> Self {
         Self {
             line_length,
             node_manager,
-            rule_stack: vec![rules],
+            lex_state: vec![LexState::Main],
             node_buffer: Vec::new(),
             comment_buffer: Vec::new(),
             line_buffer: Vec::new(),
@@ -72,43 +74,35 @@ impl Analyzer {
         Ok(())
     }
 
-    /// Try each rule in priority order; execute the first match.
-    /// Rules are `&'static [Rule]`, so borrowing the action gives `&'static Action`
-    /// which doesn't conflict with the mutable borrow of `self` in execute_action.
+    /// Lex one token using byte dispatch. Returns the action, match_len,
+    /// prefix, and token_text without any regex overhead.
     fn lex_one(&mut self, source: &str) -> Result<(), SqlfmtError> {
         let remaining = &source[self.pos..];
         if remaining.is_empty() {
             return Ok(());
         }
 
-        // Rules are &'static, so `action` is &'static Action — no borrow on `self`.
-        // `prefix` and `token_text` borrow from `remaining` (borrows `source`, not `self`).
-        // This means we can call `self.execute_action()` without any clone.
-        let rules = self
-            .rule_stack
+        let state = *self
+            .lex_state
             .last()
-            .expect("rule_stack initialized with main rules in Analyzer::new");
-        for rule in *rules {
-            if let Some(captures) = rule.pattern.captures(remaining) {
-                let match_len = captures
-                    .get(0)
-                    .expect("regex group 0 always exists on match")
-                    .as_str()
-                    .len();
-                let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
-                let token_text = captures.get(2).map(|m| m.as_str()).unwrap_or("");
-                let action = &rule.action;
-                return self.execute_action(action, match_len, prefix, token_text, source);
-            }
-        }
+            .expect("lex_state initialized with Main in Analyzer::new");
 
-        Err(SqlfmtError::Parsing {
-            position: self.pos,
-            message: format!(
-                "No rule matched near: {:?}",
-                &remaining[..remaining.len().min(40)]
+        match lexer::lex_one(remaining, state) {
+            Some(result) => self.execute_action(
+                result.action,
+                result.match_len,
+                result.prefix,
+                result.token_text,
+                source,
             ),
-        })
+            None => Err(SqlfmtError::Parsing {
+                position: self.pos,
+                message: format!(
+                    "No token matched near: {:?}",
+                    &remaining[..remaining.len().min(40)]
+                ),
+            }),
+        }
     }
 
     /// Dispatch an action based on what the rule matched.
@@ -130,9 +124,9 @@ impl Analyzer {
                 }
                 self.add_node(prefix, token_text, *token_type);
                 if *token_type == TokenType::FmtOff {
-                    self.push_rules(crate::rules::fmt_off_rules());
+                    self.push_state(LexState::FmtOff);
                 } else if *token_type == TokenType::FmtOn {
-                    self.pop_rules();
+                    self.pop_state();
                 }
                 self.pos += match_len;
             }
@@ -146,11 +140,6 @@ impl Analyzer {
             }
 
             Action::AddComment => {
-                self.add_comment(prefix, token_text);
-                self.pos += match_len;
-            }
-
-            Action::AddJinjaComment => {
                 self.add_comment(prefix, token_text);
                 self.pos += match_len;
             }
@@ -173,8 +162,8 @@ impl Analyzer {
             Action::HandleSemicolon => {
                 self.add_node(prefix, token_text, TokenType::Semicolon);
                 self.flush_line_buffer();
-                while self.rule_stack.len() > 1 {
-                    self.rule_stack.pop();
+                while self.lex_state.len() > 1 {
+                    self.lex_state.pop();
                 }
                 self.node_manager.reset();
                 self.suppress_next_newline = true;
@@ -285,19 +274,16 @@ impl Analyzer {
             }
 
             Action::LexRuleset { ruleset_name } => {
-                // Push the alternate ruleset and re-lex from the same position.
-                // The new ruleset will re-match the trigger keyword, potentially
-                // with a longer pattern (e.g., "revoke grant option for" in GRANT
-                // ruleset). This mirrors Python sqlfmt's lex_ruleset behavior.
-                let ruleset = match *ruleset_name {
-                    "grant" => crate::rules::grant_rules(),
-                    "function" => crate::rules::function_rules(),
-                    "warehouse" => crate::rules::warehouse_rules(),
-                    "clone" => crate::rules::clone_rules(),
-                    _ => crate::rules::unsupported_rules(),
+                // Push the alternate lex state and re-lex from the same position.
+                let new_state = match *ruleset_name {
+                    "grant" => LexState::Grant,
+                    "function" => LexState::Function,
+                    "warehouse" => LexState::Warehouse,
+                    "clone" => LexState::Clone,
+                    _ => LexState::Unsupported,
                 };
-                self.push_rules(ruleset);
-                // Don't advance pos — let the new ruleset re-lex from current position
+                self.push_state(new_state);
+                // Don't advance pos — let the new state re-lex from current position
             }
         }
 
@@ -395,7 +381,7 @@ impl Analyzer {
             || check.starts_with('`')
             || check.starts_with("$$");
         if !next_is_quoted {
-            self.pop_rules();
+            self.pop_state();
         }
     }
 
@@ -421,19 +407,19 @@ impl Analyzer {
     }
 
     /// Handle {% endif %}, {% endfor %}, etc. — close the jinja block,
-    /// popping data-mode rules if this is an endset/endcall.
+    /// popping data-mode state if this is an endset/endcall.
     fn handle_jinja_block_end(&mut self, prefix: &str, token_text: &str) {
-        if self.rule_stack.len() > 1 {
+        if self.lex_state.len() > 1 {
             let lower = token_text.to_lowercase();
             if lower.contains("endset") || lower.contains("endcall") {
-                self.pop_rules();
+                self.pop_state();
             }
         }
         self.node_manager.pop_jinja_block();
         self.add_node(prefix, token_text, TokenType::JinjaBlockEnd);
     }
 
-    /// Push data-mode rules for {% call %} and {% set %} blocks.
+    /// Push data-mode state for {% call %} and {% set %} blocks.
     fn maybe_push_jinja_data_rules(&mut self, token_text: &str) {
         // Strip Jinja delimiters and whitespace without allocating a lowercased copy.
         let stripped = token_text
@@ -446,9 +432,9 @@ impl Analyzer {
             starts_with_ci(s, prefix) && !starts_with_ci(s, not_prefix)
         };
         if starts_with_ci_not(stripped, "call", "call statement") {
-            self.push_rules(crate::rules::jinja_call_block_rules());
+            self.push_state(LexState::JinjaCallBlock);
         } else if starts_with_ci(stripped, "set") && !token_text.contains('=') {
-            self.push_rules(crate::rules::jinja_set_block_rules());
+            self.push_state(LexState::JinjaSetBlock);
         }
     }
 
@@ -478,8 +464,8 @@ impl Analyzer {
 
     /// Add a node to the node buffer.
     fn add_node(&mut self, prefix: &str, token_text: &str, token_type: TokenType) {
-        let spos = self.pos;
-        let epos = spos + prefix.len() + token_text.len();
+        let spos = self.pos as u32;
+        let epos = spos + (prefix.len() + token_text.len()) as u32;
         let token = Token::new(token_type, prefix, token_text, spos, epos);
 
         let prev = self.previous_node_index();
@@ -498,8 +484,8 @@ impl Analyzer {
 
     /// Add a comment to the comment buffer.
     fn add_comment(&mut self, _prefix: &str, token_text: &str) {
-        let spos = self.pos;
-        let epos = spos + token_text.len();
+        let spos = self.pos as u32;
+        let epos = spos + token_text.len() as u32;
         let token = Token::new(TokenType::Comment, "", token_text, spos, epos);
         let is_standalone = self.node_buffer.is_empty();
         let prev = self.comment_prev_node(is_standalone);
@@ -591,8 +577,8 @@ impl Analyzer {
                 TokenType::Newline,
                 &self.trailing_whitespace,
                 "\n",
-                self.pos,
-                self.pos + 1,
+                self.pos as u32,
+                (self.pos + 1) as u32,
             );
             let node = self.node_manager.create_node(token, prev, &self.arena);
             let idx = self.arena.len();
@@ -636,8 +622,8 @@ impl Analyzer {
             TokenType::Newline,
             &self.trailing_whitespace,
             "\n",
-            self.pos,
-            self.pos + 1,
+            self.pos as u32,
+            (self.pos + 1) as u32,
         );
         let nl_node = self
             .node_manager
@@ -771,11 +757,18 @@ impl Analyzer {
 
         while i < len {
             if in_comment {
-                if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                    in_comment = false;
-                    i += 2;
+                // Use memchr to jump to next '*' inside a block comment
+                if let Some(offset) = memchr(b'*', &bytes[i..]) {
+                    let pos = i + offset;
+                    if pos + 1 < len && bytes[pos + 1] == b'/' {
+                        in_comment = false;
+                        i = pos + 2;
+                    } else {
+                        i = pos + 1;
+                    }
                 } else {
-                    i += 1;
+                    // No '*' found — rest is all comment
+                    break;
                 }
                 continue;
             }
@@ -785,8 +778,11 @@ impl Analyzer {
                 continue;
             }
             if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
-                while i < len && bytes[i] != b'\n' {
-                    i += 1;
+                // Use memchr to find end of line comment
+                if let Some(offset) = memchr(b'\n', &bytes[i..]) {
+                    i += offset;
+                } else {
+                    i = len;
                 }
                 continue;
             }
@@ -840,13 +836,13 @@ impl Analyzer {
         Ok(())
     }
 
-    fn push_rules(&mut self, rules: &'static [Rule]) {
-        self.rule_stack.push(rules);
+    fn push_state(&mut self, state: LexState) {
+        self.lex_state.push(state);
     }
 
-    fn pop_rules(&mut self) {
-        if self.rule_stack.len() > 1 {
-            self.rule_stack.pop();
+    fn pop_state(&mut self) {
+        if self.lex_state.len() > 1 {
+            self.lex_state.pop();
         }
     }
 }
@@ -884,12 +880,10 @@ fn skip_jinja_block(bytes: &[u8], i: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::main_rules;
 
     fn create_analyzer() -> Analyzer {
-        let rules = main_rules();
         let nm = NodeManager::new(false);
-        Analyzer::new(rules, nm, 88)
+        Analyzer::new(nm, 88)
     }
 
     #[test]

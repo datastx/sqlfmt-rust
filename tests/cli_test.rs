@@ -175,7 +175,7 @@ fn test_stdin_lowercases_keywords() {
 
 #[test]
 fn test_error_file_exits_with_code_2() {
-    let dir = setup_temp_dir(&[("bad.sql", "select $\n")]);
+    let dir = setup_temp_dir(&[("bad.sql", "select */\n")]);
     sqlfmt()
         .arg(dir.path())
         .assert()
@@ -185,7 +185,7 @@ fn test_error_file_exits_with_code_2() {
 
 #[test]
 fn test_error_with_check_mode() {
-    let dir = setup_temp_dir(&[("bad.sql", "select $\n")]);
+    let dir = setup_temp_dir(&[("bad.sql", "select */\n")]);
     sqlfmt().arg("--check").arg(dir.path()).assert().code(2);
 }
 
@@ -602,6 +602,6 @@ fn test_exit_code_1_on_check_failure() {
 
 #[test]
 fn test_exit_code_2_on_error() {
-    let dir = setup_temp_dir(&[("bad.sql", "select $\n")]);
+    let dir = setup_temp_dir(&[("bad.sql", "select */\n")]);
     sqlfmt().arg(dir.path()).assert().code(2);
 }

@@ -149,37 +149,51 @@ impl LineMerger {
     /// Python sqlfmt always uses trailing comma style.
     /// Don't merge commas with Jinja block tags ({% if %}, {% else %}, etc.)
     /// as the comma is part of the block's content, not the tag itself.
+    /// Uses a mark-and-sweep approach to avoid O(n²) from Vec::remove().
     fn fix_standalone_commas(&self, lines: &mut Vec<Line>, arena: &[Node]) {
-        let mut i = 0;
-        while i < lines.len() {
-            if !lines[i].is_standalone_comma(arena) || i == 0 {
-                i += 1;
+        let len = lines.len();
+        let mut remove = vec![false; len];
+        let mut last_content_idx: Option<usize> = None;
+
+        for i in 0..len {
+            if remove[i] {
                 continue;
             }
-
-            let prev_idx = find_prev_content_line(lines, i, arena);
-            let Some(pi) = prev_idx else {
-                i += 1;
-                continue;
-            };
-
-            if is_jinja_block_line(&lines[pi], arena) {
-                i += 1;
-                continue;
-            }
-
-            let to_merge = vec![lines[pi].clone(), lines[i].clone()];
-            if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
-                if let Some(merged_line) = merged.into_iter().find(|l| !l.is_blank_line(arena)) {
-                    lines[pi] = merged_line;
-                    lines.remove(i);
-                    while pi + 1 < lines.len() && lines[pi + 1].is_blank_line(arena) {
-                        lines.remove(pi + 1);
+            if lines[i].is_standalone_comma(arena) && i > 0 {
+                if let Some(pi) = last_content_idx {
+                    if !is_jinja_block_line(&lines[pi], arena) {
+                        let to_merge = vec![lines[pi].clone(), lines[i].clone()];
+                        if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
+                            if let Some(merged_line) =
+                                merged.into_iter().find(|l| !l.is_blank_line(arena))
+                            {
+                                lines[pi] = merged_line;
+                                remove[i] = true;
+                                for j in (pi + 1)..i {
+                                    if lines[j].is_blank_line(arena) {
+                                        remove[j] = true;
+                                    }
+                                }
+                                continue;
+                            }
+                        }
                     }
-                    continue;
                 }
             }
-            i += 1;
+
+            if !lines[i].is_blank_line(arena) && !lines[i].is_standalone_comment_line(arena) {
+                last_content_idx = Some(i);
+            }
+        }
+
+        if remove.iter().any(|&r| r) {
+            let mut new_lines = Vec::with_capacity(len);
+            for (i, line) in lines.drain(..).enumerate() {
+                if !remove[i] {
+                    new_lines.push(line);
+                }
+            }
+            *lines = new_lines;
         }
     }
 
@@ -234,62 +248,51 @@ impl LineMerger {
     }
 
     /// Extract nodes and comments from lines, validating merge rules.
+    /// Combines inline comment validation, interior standalone comment detection,
+    /// and node extraction into a single pass.
     fn extract_components(
         lines: &[Line],
         arena: &[Node],
     ) -> Result<(Vec<usize>, Vec<crate::comment::Comment>), ControlFlow> {
-        // Lines with inline comments can only be merged if the following
-        // line is a standalone comma or blank line. This allows the trailing
-        // comma pattern: "2,  -- two inline" (inline comment line + comma).
-        // Python sqlfmt tracks `has_inline_comment_above` and only allows
-        // standalone commas or blank lines after it.
         let mut has_inline_comment_above = false;
-        for line in lines.iter() {
-            if !line.comments.is_empty() {
-                if has_inline_comment_above {
-                    return Err(ControlFlow::CannotMerge);
-                }
-                let has_inline = line.comments.iter().any(|c| c.is_inline());
-                if has_inline && !line.is_blank_line(arena) {
-                    has_inline_comment_above = true;
-                }
-            } else if has_inline_comment_above
-                && !line.is_standalone_comma(arena)
-                && !line.is_blank_line(arena)
-            {
-                return Err(ControlFlow::CannotMerge);
-            }
-        }
-
-        let first_content = lines
-            .iter()
-            .position(|l| !l.is_blank_line(arena) && !l.is_standalone_comment_line(arena));
-        let last_content = lines
-            .iter()
-            .rposition(|l| !l.is_blank_line(arena) && !l.is_standalone_comment_line(arena));
-        if let (Some(first), Some(last)) = (first_content, last_content) {
-            if first < last {
-                for (i, line) in lines.iter().enumerate() {
-                    if i > first && i < last && line.is_standalone_comment_line(arena) {
-                        return Err(ControlFlow::CannotMerge);
-                    }
-                }
-            }
-        }
+        let mut first_content_seen = false;
+        let mut pending_interior_comment = false;
 
         let mut nodes = Vec::new();
         let mut comments = Vec::new();
         let mut final_newline: Option<usize> = None;
         let mut has_multiline_jinja = false;
-        // Track Jinja block nesting depth across merged lines.
-        // When a JinjaBlockEnd is encountered and depth is 0, the matching
-        // JinjaBlockStart is NOT in this merge set, so the block end must
-        // stay on its own line (e.g., {% endif %} after {% else %} content).
-        // When depth > 0, the block start IS in this merge set, so the whole
-        // block can merge onto one line (e.g., {% for %}...{% endfor %}).
         let mut jinja_block_depth: i32 = 0;
 
         for line in lines {
+            let is_blank = line.is_blank_line(arena);
+            let is_standalone_comment = line.is_standalone_comment_line(arena);
+            let is_content = !is_blank && !is_standalone_comment;
+
+            // --- Inline comment validation ---
+            if !line.comments.is_empty() {
+                if has_inline_comment_above {
+                    return Err(ControlFlow::CannotMerge);
+                }
+                let has_inline = line.comments.iter().any(|c| c.is_inline());
+                if has_inline && !is_blank {
+                    has_inline_comment_above = true;
+                }
+            } else if has_inline_comment_above && !line.is_standalone_comma(arena) && !is_blank {
+                return Err(ControlFlow::CannotMerge);
+            }
+
+            // --- Interior standalone comment detection ---
+            if is_content {
+                if pending_interior_comment {
+                    return Err(ControlFlow::CannotMerge);
+                }
+                first_content_seen = true;
+            } else if is_standalone_comment && first_content_seen {
+                pending_interior_comment = true;
+            }
+
+            // --- Node extraction with merge rule validation ---
             if has_multiline_jinja {
                 let starts_with_op = line
                     .first_content_node(arena)
@@ -361,8 +364,6 @@ impl LineMerger {
 
                 match node.token.token_type {
                     crate::token::TokenType::JinjaBlockStart => {
-                        // Two JinjaBlockStart tokens shouldn't be merged
-                        // (each block start needs its own line)
                         if jinja_block_depth > 0 {
                             return Err(ControlFlow::CannotMerge);
                         }
@@ -675,7 +676,7 @@ impl LineMerger {
         segment: Segment,
         arena: &[Node],
     ) -> Vec<Segment> {
-        let prev_segment = match prev_segments.pop() {
+        let mut prev_segment = match prev_segments.pop() {
             Some(s) => s,
             None => {
                 prev_segments.push(segment);
@@ -692,10 +693,12 @@ impl LineMerger {
             }
         };
 
-        let mut try_lines = Vec::with_capacity(prev_segment.lines.len() + 1);
-        try_lines.extend_from_slice(&prev_segment.lines);
-        try_lines.push(head_line.clone());
-        if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+        // Attempt 1: merge all prev_segment lines + head_line.
+        // Temporarily push onto prev_segment to avoid cloning all its lines.
+        prev_segment.lines.push(head_line.clone());
+        let attempt1 = self.create_merged_line(&prev_segment.lines, arena);
+        prev_segment.lines.pop();
+        if let Ok(merged) = attempt1 {
             let mut result_seg = Segment::new(merged);
             result_seg
                 .lines
@@ -705,6 +708,7 @@ impl LineMerger {
         }
 
         if let Ok((tail_idx, tail_line)) = prev_segment.tail(arena) {
+            let tail_line = tail_line.clone();
             let mut try_lines = Vec::with_capacity(1 + segment.lines.len());
             try_lines.push(tail_line.clone());
             try_lines.extend_from_slice(&segment.lines);
@@ -716,7 +720,7 @@ impl LineMerger {
                 return prev_segments;
             }
 
-            let try_lines = vec![tail_line.clone(), head_line];
+            let try_lines = [tail_line, head_line];
             if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
                 let tail_start = prev_segment.lines.len() - 1 - tail_idx;
                 let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
@@ -733,13 +737,6 @@ impl LineMerger {
         prev_segments.push(segment);
         prev_segments
     }
-}
-
-/// Find the previous non-blank, non-comment line before index `i`.
-fn find_prev_content_line(lines: &[Line], i: usize, arena: &[Node]) -> Option<usize> {
-    (0..i)
-        .rev()
-        .find(|&j| !lines[j].is_blank_line(arena) && !lines[j].is_standalone_comment_line(arena))
 }
 
 /// Check if a line starts with a Jinja block tag.
@@ -774,10 +771,10 @@ mod tests {
         let idx = arena.len();
         let prev = if idx > 0 { Some(idx - 1) } else { None };
         arena.push(Node::new(
-            Token::new(tt, "", val, 0, val.len()),
+            Token::new(tt, "", val, 0, val.len() as u32),
             prev,
-            prefix.to_string(),
-            val.to_string(),
+            compact_str::CompactString::from(prefix),
+            compact_str::CompactString::from(val),
             smallvec::SmallVec::new(),
             smallvec::SmallVec::new(),
         ));
