@@ -2140,14 +2140,34 @@ fn lex_identifier<'a>(
     // Build lowercase of full multi-word keyword for classification.
     // Normalize all whitespace (including newlines) to single spaces so
     // keyword matching works regardless of original whitespace.
-    let full_lower: String;
+    // Use a stack buffer to avoid heap allocation (multi-word keywords are short).
+    let mut full_lower_buf = [0u8; 128];
     let classify_key: &str = if total_word_len == word_len {
         lower
     } else {
-        // Lowercase and normalize whitespace to single spaces
-        let raw_lower = full_text.to_ascii_lowercase();
-        full_lower = raw_lower.split_whitespace().collect::<Vec<_>>().join(" ");
-        &full_lower
+        // Lowercase and normalize whitespace to single spaces using stack buffer
+        let src = full_text.as_bytes();
+        let mut out_len = 0;
+        let mut in_ws = false;
+        for &b in src {
+            if b.is_ascii_whitespace() {
+                if !in_ws && out_len > 0 {
+                    if out_len < full_lower_buf.len() {
+                        full_lower_buf[out_len] = b' ';
+                        out_len += 1;
+                    }
+                }
+                in_ws = true;
+            } else {
+                in_ws = false;
+                if out_len < full_lower_buf.len() {
+                    full_lower_buf[out_len] = b.to_ascii_lowercase();
+                    out_len += 1;
+                }
+            }
+        }
+        // Safety: input is ASCII identifiers/keywords, output is valid UTF-8
+        unsafe { std::str::from_utf8_unchecked(&full_lower_buf[..out_len]) }
     };
 
     // Check if followed by ( for keyword-before-paren handling

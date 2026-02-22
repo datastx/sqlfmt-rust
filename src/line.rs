@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use crate::comment::Comment;
-use crate::node::{FmtDisabledVec, Node, NodeIndex};
+use crate::node::{Node, NodeIndex};
 use crate::token::TokenType;
 
 /// Pre-computed indentation strings for common indent sizes (0..=200).
@@ -35,7 +35,7 @@ pub struct Line {
     pub previous_node: Option<NodeIndex>,
     pub nodes: Vec<NodeIndex>,
     pub comments: Vec<Comment>,
-    pub formatting_disabled: FmtDisabledVec,
+    pub formatting_disabled: bool,
 }
 
 impl Line {
@@ -44,7 +44,7 @@ impl Line {
             previous_node,
             nodes: Vec::new(),
             comments: Vec::new(),
-            formatting_disabled: smallvec::SmallVec::new(),
+            formatting_disabled: false,
         }
     }
 
@@ -437,7 +437,7 @@ impl Line {
 
     /// True if formatting is disabled for this line.
     pub fn has_formatting_disabled(&self) -> bool {
-        !self.formatting_disabled.is_empty()
+        self.formatting_disabled
     }
 
     /// Append a node index to this line.
@@ -683,7 +683,7 @@ mod tests {
     fn test_has_formatting_disabled() {
         let mut line = Line::new(None);
         assert!(!line.has_formatting_disabled());
-        line.formatting_disabled.push(0);
+        line.formatting_disabled = true;
         assert!(line.has_formatting_disabled());
     }
 

@@ -272,7 +272,7 @@ fn split_line_at_jinja(line: Line, split_pos: usize, arena: &mut Vec<Node>) -> (
     let nl_idx = arena.len();
     arena.push(nl_node);
     line1.append_node(nl_idx);
-    line1.formatting_disabled = line.formatting_disabled.clone();
+    line1.formatting_disabled = line.formatting_disabled;
 
     let mut line2 = Line::new(prev_idx);
     for &idx in &line.nodes[split_pos..] {
