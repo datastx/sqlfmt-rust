@@ -2151,11 +2151,9 @@ fn lex_identifier<'a>(
         let mut in_ws = false;
         for &b in src {
             if b.is_ascii_whitespace() {
-                if !in_ws && out_len > 0 {
-                    if out_len < full_lower_buf.len() {
-                        full_lower_buf[out_len] = b' ';
-                        out_len += 1;
-                    }
+                if !in_ws && out_len > 0 && out_len < full_lower_buf.len() {
+                    full_lower_buf[out_len] = b' ';
+                    out_len += 1;
                 }
                 in_ws = true;
             } else {

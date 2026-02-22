@@ -166,7 +166,10 @@ impl NodeManager {
             .collect();
         self.open_jinja_blocks = self.node_open_jinja.clone();
 
-        (self.node_open_brackets.clone(), self.node_open_jinja.clone())
+        (
+            self.node_open_brackets.clone(),
+            self.node_open_jinja.clone(),
+        )
     }
 
     /// Compute formatting_disabled state from previous node.
