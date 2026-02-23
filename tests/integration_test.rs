@@ -1039,13 +1039,12 @@ fn test_fixture_for_update() {
 // Test: Complex dbt model with many CTEs, Jinja refs/sources, QUALIFY, window functions
 // This file was causing a stack overflow due to deep recursion in the merger.
 #[test]
-fn test_format_dbt_pharmacy_panels() {
-    let source =
-        std::fs::read_to_string("tests/fixtures/dbt_pharmacy_panels.sql").unwrap();
+fn test_format_dbt_deeply_nested() {
+    let source = std::fs::read_to_string("tests/fixtures/dbt_deeply_nested.sql").unwrap();
     let result = format_string(&source, &default_mode());
     assert!(
         result.is_ok(),
-        "Should successfully format dbt_pharmacy_panels.sql without stack overflow: {:?}",
+        "Should successfully format dbt_deeply_nested.sql without stack overflow: {:?}",
         result.err()
     );
     // Verify idempotency
@@ -1053,6 +1052,6 @@ fn test_format_dbt_pharmacy_panels() {
     let second = format_string(&formatted, &default_mode()).unwrap();
     assert_eq!(
         formatted, second,
-        "dbt_pharmacy_panels.sql formatting should be idempotent"
+        "dbt_deeply_nested.sql formatting should be idempotent"
     );
 }
