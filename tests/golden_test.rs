@@ -463,6 +463,10 @@ golden_test!(
     golden_unformatted_221_dbt_config_dollar_quoted,
     "tests/data/unformatted/221_dbt_config_dollar_quoted.sql"
 );
+golden_test!(
+    golden_unformatted_222_colorado_claims_extract,
+    "tests/data/unformatted/222_colorado_claims_extract.sql"
+);
 
 // =============================================================================
 // Unformatted golden tests — 300-series (Jinja formatting)
