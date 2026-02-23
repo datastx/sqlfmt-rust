@@ -35,12 +35,23 @@ impl LineMerger {
                 let segments = build_segments(lines, arena);
 
                 if segments.len() > 1 {
+                    let input_line_count = lines.len();
                     let segments = self.fix_standalone_operators(segments, arena);
                     let segments =
                         self.maybe_merge_operators(segments, OperatorPrecedence::tiers(), arena);
                     let segments = self.maybe_stubbornly_merge(segments, arena);
-                    for segment in &segments {
-                        merged_lines.extend(self.maybe_merge_lines(&segment.lines, arena));
+
+                    // Guard against infinite recursion: if segment processing
+                    // collapsed multiple segments back into a single segment
+                    // with the same number of lines as the input, fall through
+                    // to single-segment processing instead of recursing with
+                    // identical input.
+                    if segments.len() == 1 && segments[0].lines.len() == input_line_count {
+                        self.merge_single_segment(&segments[0], arena, &mut merged_lines);
+                    } else {
+                        for segment in &segments {
+                            merged_lines.extend(self.maybe_merge_lines(&segment.lines, arena));
+                        }
                     }
                 } else {
                     self.merge_single_segment(&segments[0], arena, &mut merged_lines);
