@@ -394,7 +394,7 @@ fn scan_block_comment(bytes: &[u8]) -> usize {
 }
 
 /// Scan a dollar-quoted string ($tag$...$tag$). `bytes` starts at `$`.
-fn scan_dollar_string(bytes: &[u8]) -> usize {
+pub(crate) fn scan_dollar_string(bytes: &[u8]) -> usize {
     // Find the end of the opening tag
     let mut tag_end = 1;
     while tag_end < bytes.len()
