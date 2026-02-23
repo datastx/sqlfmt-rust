@@ -15,4 +15,7 @@
     )
 }}
 
-select campaign_name, date_part, count(distinct user_id) as users
+select
+    campaign_name
+    , date_part
+    , count(distinct user_id) as users

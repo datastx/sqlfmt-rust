@@ -45,10 +45,11 @@
     {% endif %}
 
     {% for attribute in results_list %}
-        ,
-        get({{ node_col }}, '{{ attribute }}')::varchar(
-            256
-        ) as attribute_{{ dbt_utils.slugify(attribute) | replace("@", "") }}
+        , get(
+            {{ node_col }}
+            , '{{ attribute }}'
+        )::varchar(256)
+        as attribute_{{ dbt_utils.slugify(attribute) | replace("@", "") }}
     {% endfor %}
 
 {% endmacro %}

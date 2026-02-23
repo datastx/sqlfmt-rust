@@ -77,11 +77,13 @@ union
 union all
 (
     select
-        'median_time_s' as ranking,
-        client,
-        category,
-        canonicaldomain,
-        median_time_s as metric,
+        'median_time_s' as ranking
+        , client
+        , category
+        , canonicaldomain
+        ,
+        median_time_s as metric
+        ,
         dense_rank() over (
             partition by client order by median_time_s desc
         ) as sorted_order
@@ -91,27 +93,27 @@ union all
 with
     geos as (
         select
-            *,
-            'mr' as geo_code,
-            'Mauritania' as geo,
-            'Africa' as region,
-            'Western Africa' as subregion
+            *
+            , 'mr' as geo_code
+            , 'Mauritania' as geo
+            , 'Africa' as region
+            , 'Western Africa' as subregion
         from `chrome-ux-report.country_mr.201907`
         union all
         select
-            *,
-            'mu' as geo_code,
-            'Mauritius' as geo,
-            'Africa' as region,
-            'Eastern Africa' as subregion
+            *
+            , 'mu' as geo_code
+            , 'Mauritius' as geo
+            , 'Africa' as region
+            , 'Eastern Africa' as subregion
         from `chrome-ux-report.country_mu.201907`
         union all
         select
-            *,
-            'yt' as geo_code,
-            'Mayotte' as geo,
-            'Africa' as region,
-            'Eastern Africa' as subregion
+            *
+            , 'yt' as geo_code
+            , 'Mayotte' as geo
+            , 'Africa' as region
+            , 'Eastern Africa' as subregion
         from `chrome-ux-report.country_yt.201907`
     )
 select geo

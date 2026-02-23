@@ -53,14 +53,11 @@ select 1
 
 select
 
-    foooooooooooo,
-    barrrrrrrrrrr,
-
-    bazzzzzzzzzzz,
-
-    quxxxxxxxxxxx,
-
     foooooooooooo
+    , barrrrrrrrrrr
+    , bazzzzzzzzzzz
+    , quxxxxxxxxxxx
+    , foooooooooooo
     + barrrrrrrrrr
     + bazzzzzzzzzzz
     + quxxxxxxxxxxx as foooooooooooo_bar_baz_qux

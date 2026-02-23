@@ -202,13 +202,15 @@ from ordered_conversion_tagged
         )
     {% endif %}
 */
-        ),
+        )
+        ,
 
         numbered as (
 
             select
 
-                *,
+                *
+                ,
 
                 row_number() over (
                     partition by visitor_id order by event_ts
@@ -216,13 +218,15 @@ from ordered_conversion_tagged
 
             from events
 
-        ),
+        )
+        ,
 
         lagged as (
 
             select
 
-                *,
+                *
+                ,
 
                 lag(event_ts) over (
                     partition by visitor_id order by event_number
@@ -230,37 +234,41 @@ from ordered_conversion_tagged
 
             from numbered
 
-        ),
+        )
+        ,
 
         diffed as (
 
             select
-                *,
-                {{ dbt_utils.datediff("event_ts", "previous_event_ts", "second") }}
+                *
+                , {{ dbt_utils.datediff("event_ts", "previous_event_ts", "second") }}
                 as period_of_inactivity
 
             from lagged
 
-        ),
+        )
+        ,
 
         new_sessions as (
 
             select
-                *,
-                case
+                *
+                , case
                     when period_of_inactivity * -1 <= {{ var("web_inactivity_cutoff") }}
                     then 0
                     else 1
                 end as new_session
             from diffed
 
-        ),
+        )
+        ,
 
         session_numbers as (
 
             select
 
-                *,
+                *
+                ,
 
                 sum(new_session) over (
                     partition by visitor_id
@@ -270,80 +278,95 @@ from ordered_conversion_tagged
 
             from new_sessions
 
-        ),
+        )
+        ,
 
         session_ids as (
 
             select
-                event_id,
-                event_type,
-                event_ts,
-                event_details,
-                page_title,
-                page_url_path,
-                referrer_host,
-                search,
-                page_url,
-                page_url_host,
-                gclid,
-                utm_term,
-                utm_content,
-                utm_medium,
-                utm_campaign,
-                utm_source,
-                ip,
-                visitor_id,
-                user_id,
-                device,
-                device_category,
-                event_number,
-                md5(
+                event_id
+                , event_type
+                , event_ts
+                , event_details
+                , page_title
+                , page_url_path
+                , referrer_host
+                , search
+                , page_url
+                , page_url_host
+                , gclid
+                , utm_term
+                , utm_content
+                , utm_medium
+                , utm_campaign
+                , utm_source
+                , ip
+                , visitor_id
+                , user_id
+                , device
+                , device_category
+                , event_number
+                , md5(
                     cast(
                         concat(
-                            coalesce(cast(visitor_id as string), ''),
-                            '-',
-                            coalesce(cast(session_number as string), '')
+                            coalesce(
+                                cast(visitor_id as string)
+                                , ''
+                            )
+                            , '-'
+                            , coalesce(
+                                cast(session_number as string)
+                                , ''
+                            )
                         ) as string
                     )
-                ) as session_id,
-                site,
-                order_id,
-                total_revenue,
-                currency_code
+                ) as session_id
+                , site
+                , order_id
+                , total_revenue
+                , currency_code
             from session_numbers
-        ),
-        id_stitching as (select * from {{ ref("int_web_events_user_stitching") }}),
+        )
+        ,
+        id_stitching as (select * from {{ ref("int_web_events_user_stitching") }})
+        ,
 
         joined as (
 
             select
 
-                session_ids.*,
-
-                coalesce(
-                    id_stitching.user_id, session_ids.visitor_id
+                session_ids.*
+                , coalesce(
+                    id_stitching.user_id
+                    , session_ids.visitor_id
                 ) as blended_user_id
 
             from session_ids
             left join id_stitching on id_stitching.visitor_id = session_ids.visitor_id
 
-        ),
+        )
+        ,
         ordered as (
             select
-                *,
+                *
+                ,
                 row_number() over (
                     partition by blended_user_id order by event_ts
-                ) as event_seq,
+                ) as event_seq
+                ,
                 row_number() over (
-                    partition by blended_user_id, session_id order by event_ts
-                ) as event_in_session_seq,
-
-                case
+                    partition by
+                        blended_user_id
+                        , session_id
+                    order by event_ts
+                ) as event_in_session_seq
+                , case
                     when
                         event_type = 'Page View'
-                        and session_id = lead(session_id, 1) over (
-                            partition by visitor_id order by event_number
-                        )
+                        and session_id = lead(
+                            session_id
+                            , 1
+                        ) over (partition by visitor_id order by event_number)
                     then
                         {{
                             dbt_utils.datediff(
@@ -355,56 +378,61 @@ from ordered_conversion_tagged
                 end time_on_page_secs
             from joined
 
-        ),
+        )
+        ,
         ordered_conversion_tagged as (
             select
                 o.*
                 {% if var("attribution_conversion_event_type") %}
+                    , case
+                        when
+                            o.event_type in (
+                                '{{ var(' attribution_conversion_event_type ') }}'
+                                , '{{ var(' attribution_create_account_event_type ') }}'
+                            )
+                        then
+                            lag(
+                                o.page_url
+                                , 1
+                            ) over (partition by o.blended_user_id order by o.event_seq)
+                    end as converting_page_url
+                    , case
+                        when
+                            o.event_type in (
+                                '{{ var(' attribution_conversion_event_type ') }}'
+                                , '{{ var(' attribution_create_account_event_type ') }}'
+                            )
+                        then
+                            lag(
+                                o.page_title
+                                , 1
+                            ) over (partition by o.blended_user_id order by o.event_seq)
+                    end as converting_page_title
+                    , case
+                        when
+                            o.event_type in (
+                                '{{ var(' attribution_conversion_event_type ') }}'
+                                , '{{ var(' attribution_create_account_event_type ') }}'
+                            )
+                        then
+                            lag(
+                                o.page_url
+                                , 2
+                            ) over (partition by o.blended_user_id order by o.event_seq)
+                    end as pre_converting_page_url
+                    , case
+                        when
+                            o.event_type in (
+                                '{{ var(' attribution_conversion_event_type ') }}'
+                                , '{{ var(' attribution_create_account_event_type ') }}'
+                            )
+                        then
+                            lag(
+                                o.page_title
+                                , 2
+                            ) over (partition by o.blended_user_id order by o.event_seq)
+                    end as pre_converting_page_title
                     ,
-                    case
-                        when
-                            o.event_type in (
-                                '{{ var(' attribution_conversion_event_type ') }}',
-                                '{{ var(' attribution_create_account_event_type ') }}'
-                            )
-                        then
-                            lag(o.page_url, 1) over (
-                                partition by o.blended_user_id order by o.event_seq
-                            )
-                    end as converting_page_url,
-                    case
-                        when
-                            o.event_type in (
-                                '{{ var(' attribution_conversion_event_type ') }}',
-                                '{{ var(' attribution_create_account_event_type ') }}'
-                            )
-                        then
-                            lag(o.page_title, 1) over (
-                                partition by o.blended_user_id order by o.event_seq
-                            )
-                    end as converting_page_title,
-                    case
-                        when
-                            o.event_type in (
-                                '{{ var(' attribution_conversion_event_type ') }}',
-                                '{{ var(' attribution_create_account_event_type ') }}'
-                            )
-                        then
-                            lag(o.page_url, 2) over (
-                                partition by o.blended_user_id order by o.event_seq
-                            )
-                    end as pre_converting_page_url,
-                    case
-                        when
-                            o.event_type in (
-                                '{{ var(' attribution_conversion_event_type ') }}',
-                                '{{ var(' attribution_create_account_event_type ') }}'
-                            )
-                        then
-                            lag(o.page_title, 2) over (
-                                partition by o.blended_user_id order by o.event_seq
-                            )
-                    end as pre_converting_page_title,
                 {% endif %}
             from ordered o
         )

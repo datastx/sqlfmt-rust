@@ -250,6 +250,15 @@ impl Line {
             .find(|n| !n.is_newline())
     }
 
+    /// Get the second non-newline node (useful for leading-comma lines like `, lateral`).
+    pub fn second_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+        self.nodes
+            .iter()
+            .map(|&i| &arena[i])
+            .filter(|n| !n.is_newline())
+            .nth(1)
+    }
+
     /// Get the index of the first non-newline node.
     pub fn first_content_node_idx(&self, arena: &[Node]) -> Option<NodeIndex> {
         self.nodes.iter().copied().find(|&i| !arena[i].is_newline())

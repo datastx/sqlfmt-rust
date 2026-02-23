@@ -26,13 +26,23 @@ api_integration = demonstration_external_api_integration_01
 as 'https://xyz.execute-api.us-west-2.amazonaws.com/prod/remote_echo'
 ;
 
-create secure external function fooooobarrrrr(string_col varchar, int_col int)
+create secure external function
+    fooooobarrrrr(
+        string_col varchar
+        , int_col int
+    )
 returns variant
 returns null on null input
 immutable
 comment = 'who knows what this will do!?'
 api_integration = bar
-headers = ('volume-measure' = 'liters', 'distance-measure' = 'kilometers')
+headers
+    = (
+        'volume-measure'
+        = 'liters'
+        ,
+        'distance-measure' = 'kilometers'
+    )
 context_headers = (current_timestamp)
 compression = gzip
 as 'https://www.example.com/snowflake-external-function'

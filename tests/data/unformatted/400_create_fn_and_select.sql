@@ -70,18 +70,37 @@ try {
 ;
 
 select
-    client,
-    approx_quantiles(zindices, 1000)[offset(100)] as p10,
-    approx_quantiles(zindices, 1000)[offset(250)] as p25,
-    approx_quantiles(zindices, 1000)[offset(500)] as p50,
-    approx_quantiles(zindices, 1000)[offset(750)] as p75,
-    approx_quantiles(zindices, 1000)[offset(900)] as p90
+    client
+    , approx_quantiles(
+        zindices
+        , 1000
+    )[offset(100)] as p10
+    , approx_quantiles(
+        zindices
+        , 1000
+    )[offset(250)] as p25
+    , approx_quantiles(
+        zindices
+        , 1000
+    )[offset(500)] as p50
+    , approx_quantiles(
+        zindices
+        , 1000
+    )[offset(750)] as p75
+    , approx_quantiles(
+        zindices
+        , 1000
+    )[offset(900)] as p90
 from
     (
-        select client, count(distinct value) as zindices
+        select
+            client
+            , count(distinct value) as zindices
         from `httparchive.almanac.parsed_css`
         left join unnest(getzindexvalues(css)) as value
         where date = '2019-07-01'
-        group by client, page
+        group by
+            client
+            , page
     )
 group by client

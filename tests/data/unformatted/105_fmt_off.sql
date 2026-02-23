@@ -12,7 +12,10 @@ group by
 
 a
 )))))__SQLFMT_OUTPUT__(((((
-select a, b, c
+select
+    a
+    , b
+    , c
 -- fmt: off
 FROM
 

@@ -180,90 +180,131 @@ with
         select claims.*
         from {{ ref("colorado_all_payers_claim_stage") }} as claims
         where target_month = try_to_timestamp('{{ var("data_anchor_month") }}')
-    ),
-    claims_header_amts as (
+    )
+    , claims_header_amts as (
         select
-            *,
-            mc063::float
+            *
+            , mc063::float
             + mc064::float
             + mc065::float
             + mc066::float
-            + mc067::float as amt_per_record,
-            iff(mc220 = 'Y', amt_per_record, 0.0) as amt_vision,
-            iff(mc209 = 'Y', amt_per_record, 0.0) as amt_dental,
-            iff(mc209 != 'Y' and mc220 != 'Y', amt_per_record, 0.0) as amt_other
+            + mc067::float as amt_per_record
+            , iff(
+                mc220
+                = 'Y'
+                , amt_per_record
+                , 0.0
+            ) as amt_vision
+            , iff(
+                mc209
+                = 'Y'
+                , amt_per_record
+                , 0.0
+            ) as amt_dental
+            , iff(
+                mc209 != 'Y'
+                and mc220
+                != 'Y'
+                , amt_per_record
+                , 0.0
+            ) as amt_other
         from claims
-    ),
-    claims_count as (
+    )
+    , claims_count as (
         select
-            count(*) as claim_count,
-            to_char(
-                try_to_timestamp('{{ var("data_anchor_month") }}'), 'YYYYMM'
-            ) as report_month,
-            sum(amt_vision) as total_amt_vision,
-            sum(amt_dental) as total_amt_dental,
-            sum(amt_other) as total_other_amt,
-            sum(amt_per_record) as total_amt
+            count(*) as claim_count
+            , to_char(
+                try_to_timestamp('{{ var("data_anchor_month") }}')
+                , 'YYYYMM'
+            ) as report_month
+            , sum(amt_vision) as total_amt_vision
+            , sum(amt_dental) as total_amt_dental
+            , sum(amt_other) as total_other_amt
+            , sum(amt_per_record) as total_amt
         from claims_header_amts
-    ),
-    mem_eligible as (
+    )
+    , mem_eligible as (
         select
             count(
                 distinct case when me152 = 'Y' then member_id else null end
-            ) as cnt_mem_vision_eligible,
-            count(
+            ) as cnt_mem_vision_eligible
+            , count(
                 distinct case when me020 = 'Y' then member_id else null end
-            ) as cnt_mem_dental_eligible,
-            count(
+            ) as cnt_mem_dental_eligible
+            , count(
                 distinct
                 case when me018 = 'Y' or me123 = 'Y' then member_id else null end
             ) as cnt_all_mem
         from {{ ref("colorado_all_payers_member_eligibility_stage") }}
-    ),
-    claim_header_fields as (
+    )
+    , claim_header_fields as (
         select
-            a.*,
-            b.*,
-            replace(
-                round(div0(a.total_amt * 1.0, b.cnt_all_mem)::float, 2), '.', ''
-            ) as hd007,
-            replace(
+            a.*
+            , b.*
+            , replace(
                 round(
-                    div0(a.total_amt_dental * 1.0, b.cnt_mem_dental_eligible)::float, 2
-                ),
-                '.',
-                ''
-            ) as hd009,
-            replace(
+                    div0(
+                        a.total_amt
+                        * 1.0
+                        , b.cnt_all_mem
+                    )::float
+                    , 2
+                )
+                , '.'
+                , ''
+            ) as hd007
+            , replace(
                 round(
-                    div0(a.total_amt_vision * 1.0, b.cnt_mem_vision_eligible)::float, 2
-                ),
-                '.',
-                ''
+                    div0(
+                        a.total_amt_dental
+                        * 1.0
+                        , b.cnt_mem_dental_eligible
+                    )::float
+                    , 2
+                )
+                , '.'
+                , ''
+            ) as hd009
+            , replace(
+                round(
+                    div0(
+                        a.total_amt_vision
+                        * 1.0
+                        , b.cnt_mem_vision_eligible
+                    )::float
+                    , 2
+                )
+                , '.'
+                , ''
             ) as hd010
-        from claims_count as a, mem_eligible as b
-    ),
-    header_stage as (
+        from
+            claims_count as a
+            , mem_eligible as b
+    )
+    , header_stage as (
         select
             concat_ws(
-                '|',
-                'HD',  -- HD001 HEADER INDICATOR
-                'MC',  -- HD002 RECORD TYPE
-                'COC0135',  -- HD003 PAYER CODE
-                'DHP_COC0135',  -- HD004 PAYER NAME
-                report_month,  -- HD005 BEGINNING MONTH
-                report_month,  -- HD006 ENDING MONTH
-                ifnull(claim_count, 0),  -- HD007 RECORD COUNT
-                hd007,  -- HD008 MED_BH PMPM
-                '',  -- HD009 PHARMACY PMPM (leave blank)
-                hd009,  -- HD010 DENTAL PMPM
-                hd010,  -- HD011 VISION PMPM
-                case when '{{ var("file_env") }}' = 'TEST' then 'T' else 'P' end  -- HD012 FILE TYPE INDICATOR (P or T)
-            ) as text_blob,
-            1 as chunk_order
+                '|'
+                , 'HD'  -- HD001 HEADER INDICATOR
+                , 'MC'  -- HD002 RECORD TYPE
+                , 'COC0135'  -- HD003 PAYER CODE
+                , 'DHP_COC0135'  -- HD004 PAYER NAME
+                , report_month  -- HD005 BEGINNING MONTH
+                , report_month  -- HD006 ENDING MONTH
+                , ifnull(
+                    claim_count
+                    , 0
+                )  -- HD007 RECORD COUNT
+                , hd007  -- HD008 MED_BH PMPM
+                , ''  -- HD009 PHARMACY PMPM (leave blank)
+                , hd009  -- HD010 DENTAL PMPM
+                , hd010  -- HD011 VISION PMPM
+                , case when '{{ var("file_env") }}' = 'TEST' then 'T' else 'P' end  -- HD012 FILE TYPE INDICATOR (P or T)
+            ) as text_blob
+            , 1 as chunk_order
         from claim_header_fields
-    ),
-    base_stage as (
+    )
+    , base_stage as (
         {% set all_columns = adapter.get_columns_in_relation(
             ref("colorado_all_payers_claim_stage")
         ) %}
@@ -282,53 +323,72 @@ with
         -- create data rows with pipe-delimited values
         select
             concat_ws(
-                '|',
+                '|'
+                ,
                 {%- for col in all_columns if col.name not in except_col_names %}
                     ifnull(
                     {%- if col.name in col_names_to_hardcode %}
-                            '20000219',
-                            ''
+                            '20000219'
+                            , ''
                         )
                         {%- else %}
-                            replace(replace({{ col.name }}, ',', ''), '\n', ''), ''
+                            replace(
+                                replace(
+                                    {{ col.name }}
+                                    , ','
+                                    , ''
+                                )
+                                , '\n'
+                                , ''
+                            )
+                            , ''
                         )
                     {% endif %}
                         {%- if not loop.last %} {{ "," }} {% endif %}
                 {%- endfor %}
-            ) as text_blob,
-            2 as chunk_order
+            ) as text_blob
+            , 2 as chunk_order
         from claims
-    ),
-    trailer_stage as (
+    )
+    , trailer_stage as (
         select
             concat_ws(
-                '|',
-                'TR',  -- TR001 TRAILER INDICATOR
-                'MC',  -- TR002 RECORD TYPE
-                'COC0135',  -- TR003 PAYER CODE
-                'DHP_COC0135',  -- TR004 PAYER NAME
-                report_month,  -- TR005 BEGINNING MONTH
-                report_month,  -- TR006 ENDING MONTH
-                to_char(current_timestamp, 'yyyymmdd')  -- TR007 DATE CREATED
-            ) as text_blob,
-            3 as chunk_order
+                '|'
+                , 'TR'  -- TR001 TRAILER INDICATOR
+                , 'MC'  -- TR002 RECORD TYPE
+                , 'COC0135'  -- TR003 PAYER CODE
+                , 'DHP_COC0135'  -- TR004 PAYER NAME
+                , report_month  -- TR005 BEGINNING MONTH
+                , report_month  -- TR006 ENDING MONTH
+                , to_char(
+                    current_timestamp
+                    , 'yyyymmdd'
+                )  -- TR007 DATE CREATED
+            ) as text_blob
+            , 3 as chunk_order
         from claims_count
-    ),
-    aggregated as (
-        select *, try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
+    )
+    , aggregated as (
+        select
+            *
+            , try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
         from header_stage
         union all
-        select *, try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
+        select
+            *
+            , try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
         from base_stage
         union all
-        select *, try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
+        select
+            *
+            , try_to_timestamp('{{ var("data_anchor_month") }}') as target_month
         from trailer_stage
     )
 select
-    text_blob,
-    chunk_order,
-    target_month,
-    {{ dbt_utils.generate_surrogate_key(["target_month", "text_blob"]) }}
+    text_blob
+    , chunk_order
+    , target_month
+    , {{ dbt_utils.generate_surrogate_key(["target_month", "text_blob"]) }}
     as claim_medical_id
 from aggregated
 order by chunk_order

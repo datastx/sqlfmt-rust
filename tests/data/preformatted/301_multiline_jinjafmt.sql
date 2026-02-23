@@ -7,12 +7,18 @@ with
                 end_date="sysdate() + interval '1 year'",
             )
         }}
-    ),
-    final as (
+    )
+    , final as (
         select
-            date_day as dt,
-            date_trunc('month', date_day) as mnth,
-            date_part('day', date_day) as day_of_month
+            date_day as dt
+            , date_trunc(
+                'month'
+                , date_day
+            ) as mnth
+            , date_part(
+                'day'
+                , date_day
+            ) as day_of_month
         from base_spine
     )
 

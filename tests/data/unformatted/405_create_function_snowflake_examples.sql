@@ -100,7 +100,13 @@ as 'class TestFunc {
 }'
 ;
 
-create function my_decrement_udf(i numeric(9, 0))
+create function
+    my_decrement_udf(
+        i numeric(
+            9
+            , 0
+        )
+    )
 returns numeric
 language java
 imports = ('@~/my_decrement_udf_package_dir/my_decrement_udf_jar.jar')
@@ -127,7 +133,12 @@ as '
 create or replace function py_udf()
 returns variant
 language python runtime_version = '3.8'
-packages = ('numpy', 'pandas', 'xgboost==1.5.0')
+packages
+    = (
+        'numpy'
+        , 'pandas'
+        , 'xgboost==1.5.0'
+    )
 handler = 'udf'
 as $$
 import numpy as np
@@ -150,7 +161,11 @@ as '3.141592654::FLOAT'
 ;
 
 create function simple_table_function()
-returns table(x integer, y integer)
+returns
+    table(
+        x integer
+        , y integer
+    )
 as $$
     select 1, 2
     union all
@@ -158,14 +173,22 @@ as $$
   $$
 ;
 
-create function multiply1(a number, b number)
+create function
+    multiply1(
+        a number
+        , b number
+    )
 returns number
 comment = 'multiply two numbers'
 as 'a * b'
 ;
 
 create or replace function get_countries_for_user(id number)
-returns table(country_code char, country_name varchar)
+returns
+    table(
+        country_code char
+        , country_name varchar
+    )
 as 'select distinct c.country_code, c.country_name
       from user_addresses a, countries c
       where a.user_id = id

@@ -44,7 +44,11 @@ $$  LANGUAGE plpgsql
 )))))__SQLFMT_OUTPUT__(((((
 -- COPYRIGHT POSTGRESQL
 -- SEE https://www.postgresql.org/docs/15/sql-createfunction.html
-create function add(integer, integer)
+create function
+    add(
+        integer
+        , integer
+    )
 returns integer
 as 'select $1 + $2;'
 language sql
@@ -52,7 +56,11 @@ immutable
 returns null on null input
 ;
 
-create function add(a integer, b integer)
+create function
+    add(
+        a integer
+        , b integer
+    )
 returns integer
 language sql
 immutable
@@ -70,7 +78,12 @@ $$
 language plpgsql
 ;
 
-create function dup(in int, out f1 int, out f2 text)
+create function
+    dup(
+        in int
+        , out f1 int
+        , out f2 text
+    )
 as $$ SELECT $1, CAST($1 AS text) || ' is text' $$
 language sql
 ;
@@ -81,7 +94,11 @@ as $$ SELECT $1, CAST($1 AS text) || ' is text' $$
 language sql
 ;
 
-create function check_password(uname text, pass text)
+create function
+    check_password(
+        uname text
+        , pass text
+    )
 returns boolean
 as $$
 DECLARE passed BOOLEAN;
@@ -96,5 +113,8 @@ $$
 language plpgsql
 security definer
 -- Set a secure search_path: trusted schema(s), then 'pg_temp'.
-set search_path = admin, pg_temp
+set
+    search_path
+    = admin
+    , pg_temp
 ;
