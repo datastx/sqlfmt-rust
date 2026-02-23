@@ -360,7 +360,7 @@ impl LineMerger {
             for &node_idx in &line.nodes {
                 let node = &arena[node_idx];
 
-                if !node.formatting_disabled.is_empty() {
+                if node.formatting_disabled {
                     return Err(ControlFlow::CannotMerge);
                 }
                 if matches!(
@@ -786,8 +786,8 @@ mod tests {
             prev,
             compact_str::CompactString::from(prefix),
             compact_str::CompactString::from(val),
-            smallvec::SmallVec::new(),
-            smallvec::SmallVec::new(),
+            0,
+            0,
         ));
         idx
     }
@@ -876,7 +876,7 @@ mod tests {
 
         // Create a line with formatting disabled
         let a = make_node(&mut arena, TokenType::Name, "a", "");
-        arena[a].formatting_disabled = smallvec::smallvec![0usize];
+        arena[a].formatting_disabled = true;
         let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
         let mut disabled_line = Line::new(None);
         disabled_line.append_node(a);

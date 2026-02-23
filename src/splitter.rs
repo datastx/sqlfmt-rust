@@ -195,7 +195,7 @@ impl LineSplitter {
         if node.divides_queries() {
             return (true, false);
         }
-        if !node.formatting_disabled.is_empty() {
+        if node.formatting_disabled {
             return (false, true);
         }
 
@@ -294,12 +294,8 @@ impl LineSplitter {
             prev_idx,
             CompactString::new(""),
             CompactString::from("\n"),
-            prev_idx
-                .map(|i| arena[i].open_brackets.clone())
-                .unwrap_or_default(),
-            prev_idx
-                .map(|i| arena[i].open_jinja_blocks.clone())
-                .unwrap_or_default(),
+            prev_idx.map(|i| arena[i].bracket_depth).unwrap_or(0),
+            prev_idx.map(|i| arena[i].jinja_depth).unwrap_or(0),
         );
         let idx = arena.len();
         arena.push(nl_node);
@@ -308,7 +304,7 @@ impl LineSplitter {
 
     /// Check if a node has formatting disabled.
     fn node_has_formatting_disabled(node_idx: NodeIndex, arena: &[Node]) -> bool {
-        !arena[node_idx].formatting_disabled.is_empty()
+        arena[node_idx].formatting_disabled
     }
 }
 
@@ -326,8 +322,8 @@ mod tests {
             prev,
             CompactString::from(prefix),
             CompactString::from(val),
-            smallvec::SmallVec::new(),
-            smallvec::SmallVec::new(),
+            0,
+            0,
         ));
         idx
     }

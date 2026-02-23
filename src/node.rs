@@ -6,11 +6,9 @@ use crate::token::{Token, TokenType};
 /// Index into the node arena (Vec<Node>).
 pub type NodeIndex = usize;
 
-/// SmallVec type aliases for Node fields that are almost always small.
-/// These avoid heap allocation for the common case (0-8 elements).
+/// SmallVec type aliases used by NodeManager for internal bracket tracking.
 pub type BracketVec = SmallVec<[NodeIndex; 8]>;
 pub type JinjaBlockVec = SmallVec<[NodeIndex; 4]>;
-pub type FmtDisabledVec = SmallVec<[NodeIndex; 2]>;
 
 /// A Node wraps a Token with formatting metadata: depth, open brackets,
 /// open Jinja blocks, and a link to the previous node.
@@ -20,9 +18,12 @@ pub struct Node {
     pub previous_node: Option<NodeIndex>,
     pub prefix: CompactString,
     pub value: CompactString,
-    pub open_brackets: BracketVec,
-    pub open_jinja_blocks: JinjaBlockVec,
-    pub formatting_disabled: FmtDisabledVec,
+    /// SQL bracket depth (number of open brackets + unterm keywords).
+    pub bracket_depth: u16,
+    /// Jinja block nesting depth.
+    pub jinja_depth: u16,
+    /// Whether formatting is disabled (fmt:off region).
+    pub formatting_disabled: bool,
 }
 
 impl Node {
@@ -31,23 +32,23 @@ impl Node {
         previous_node: Option<NodeIndex>,
         prefix: CompactString,
         value: CompactString,
-        open_brackets: BracketVec,
-        open_jinja_blocks: JinjaBlockVec,
+        bracket_depth: u16,
+        jinja_depth: u16,
     ) -> Self {
         Self {
             token,
             previous_node,
             prefix,
             value,
-            open_brackets,
-            open_jinja_blocks,
-            formatting_disabled: SmallVec::new(),
+            bracket_depth,
+            jinja_depth,
+            formatting_disabled: false,
         }
     }
 
     /// Depth is (sql_bracket_depth, jinja_block_depth).
     pub fn depth(&self) -> (usize, usize) {
-        (self.open_brackets.len(), self.open_jinja_blocks.len())
+        (self.bracket_depth as usize, self.jinja_depth as usize)
     }
 
     /// Formatted string: prefix + value.
@@ -271,8 +272,8 @@ mod tests {
             prev,
             CompactString::new(""),
             CompactString::from(value),
-            SmallVec::new(),
-            SmallVec::new(),
+            0,
+            0,
         )
     }
 
@@ -285,8 +286,8 @@ mod tests {
     #[test]
     fn test_depth_with_brackets() {
         let mut node = make_node(TokenType::Name, "foo", None);
-        node.open_brackets = smallvec::smallvec![0, 1];
-        node.open_jinja_blocks = smallvec::smallvec![2];
+        node.bracket_depth = 2;
+        node.jinja_depth = 1;
         assert_eq!(node.depth(), (2, 1));
     }
 

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use compact_str::CompactString;
 use smallvec::SmallVec;
 
-use crate::node::{BracketVec, FmtDisabledVec, JinjaBlockVec, Node, NodeIndex};
+use crate::node::{BracketVec, JinjaBlockVec, Node, NodeIndex};
 use crate::token::{Token, TokenType};
 
 /// NodeManager creates Nodes from Tokens, tracking bracket depth,
@@ -15,13 +15,19 @@ pub struct NodeManager {
     pub open_brackets: BracketVec,
     /// Current jinja block stack — used by handle_jinja_block_keyword etc.
     pub open_jinja_blocks: JinjaBlockVec,
-    pub formatting_disabled: FmtDisabledVec,
+    /// Formatting-disabled nesting depth. >0 means formatting is disabled.
+    /// Uses a counter instead of bool to handle nested Data token push/pop.
+    formatting_disabled_depth: u16,
     /// Running node-level brackets (including unterm keywords). Mutated in place
     /// to avoid cloning from arena on every node creation.
     node_open_brackets: BracketVec,
     /// Running node-level jinja block stack. Separate from open_jinja_blocks
     /// because external push/pop calls can temporarily diverge them.
     node_open_jinja: JinjaBlockVec,
+    /// Bracket snapshots parallel to node_open_jinja. When a jinja block is
+    /// opened, we snapshot node_open_brackets so we can restore it when the
+    /// block closes (without needing to store brackets in each Node).
+    node_open_jinja_bracket_snapshots: Vec<BracketVec>,
 }
 
 impl NodeManager {
@@ -30,9 +36,10 @@ impl NodeManager {
             case_sensitive_names,
             open_brackets: SmallVec::new(),
             open_jinja_blocks: SmallVec::new(),
-            formatting_disabled: SmallVec::new(),
+            formatting_disabled_depth: 0,
             node_open_brackets: SmallVec::new(),
             node_open_jinja: SmallVec::new(),
+            node_open_jinja_bracket_snapshots: Vec::new(),
         }
     }
 
@@ -46,12 +53,11 @@ impl NodeManager {
         arena: &[Node],
     ) -> Node {
         // This matches the Python pattern where depth propagates through nodes
-        let (open_brackets, open_jinja_blocks) =
-            self.compute_open_brackets(&token, previous_node, arena);
+        let (bracket_depth, jinja_depth) = self.compute_open_brackets(&token, previous_node, arena);
 
         let formatting_disabled = self.compute_formatting_disabled(&token, previous_node, arena);
 
-        let (prefix, value) = if !formatting_disabled.is_empty() {
+        let (prefix, value) = if formatting_disabled {
             (token.prefix.clone(), token.text.clone())
         } else {
             let prefix_cow = self.compute_prefix(&token, previous_node, arena);
@@ -67,31 +73,34 @@ impl NodeManager {
             previous_node,
             prefix,
             value,
-            open_brackets,
-            open_jinja_blocks,
+            bracket_depth,
+            jinja_depth,
             formatting_disabled,
         }
     }
 
-    /// Compute the list of open brackets for a new node.
+    /// Compute the bracket and jinja depths for a new node.
     ///
     /// In Python sqlfmt, the Node's open_brackets includes both actual brackets
     /// AND unterm keywords (for depth tracking). But the NodeManager's open_brackets
     /// only contains actual brackets (BracketOpen, StatementStart), used by actions
     /// like HandleNonreservedTopLevelKeyword to decide behavior.
+    ///
+    /// Returns (bracket_depth, jinja_depth) as u16 counts instead of cloned SmallVecs.
     fn compute_open_brackets(
         &mut self,
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
-    ) -> (BracketVec, JinjaBlockVec) {
+    ) -> (u16, u16) {
         // Mutate running state in place instead of cloning from arena each time.
-        // self.node_open_brackets always equals the previous node's open_brackets
+        // self.node_open_brackets always equals the previous node's brackets
         // at this point (set at end of previous call).
         match previous_node {
             None => {
                 self.node_open_brackets.clear();
                 self.node_open_jinja.clear();
+                self.node_open_jinja_bracket_snapshots.clear();
             }
             Some(prev_idx) => {
                 let prev = &arena[prev_idx];
@@ -105,6 +114,10 @@ impl NodeManager {
                         self.node_open_brackets.push(prev_idx);
                     }
                 } else if prev.is_opening_jinja_block() {
+                    // Snapshot brackets before pushing jinja block so we can
+                    // restore them when the block closes.
+                    self.node_open_jinja_bracket_snapshots
+                        .push(self.node_open_brackets.clone());
                     self.node_open_jinja.push(prev_idx);
                 }
             }
@@ -135,18 +148,20 @@ impl NodeManager {
             }
             TokenType::JinjaBlockEnd => {
                 // Pop the jinja block and restore SQL brackets to the state
-                // at the time the jinja block was opened. SQL scope inside a
-                // jinja block doesn't leak out to the closing tag.
-                // Must clone from arena here — rare path (only jinja blocks).
-                if let Some(jinja_start_idx) = self.node_open_jinja.pop() {
-                    self.node_open_brackets = arena[jinja_start_idx].open_brackets.clone();
+                // at the time the jinja block was opened.
+                if self.node_open_jinja.pop().is_some() {
+                    if let Some(snapshot) = self.node_open_jinja_bracket_snapshots.pop() {
+                        self.node_open_brackets = snapshot;
+                    }
                 }
             }
             TokenType::JinjaBlockKeyword => {
                 // {% else %}, {% elif %}, etc. close the previous block section
                 // and open a new one. Restore SQL brackets to the block start's state.
-                if let Some(jinja_start_idx) = self.node_open_jinja.pop() {
-                    self.node_open_brackets = arena[jinja_start_idx].open_brackets.clone();
+                if self.node_open_jinja.pop().is_some() {
+                    if let Some(snapshot) = self.node_open_jinja_bracket_snapshots.pop() {
+                        self.node_open_brackets = snapshot;
+                    }
                 }
             }
             TokenType::Semicolon => {
@@ -167,41 +182,40 @@ impl NodeManager {
         self.open_jinja_blocks = self.node_open_jinja.clone();
 
         (
-            self.node_open_brackets.clone(),
-            self.node_open_jinja.clone(),
+            self.node_open_brackets.len() as u16,
+            self.node_open_jinja.len() as u16,
         )
     }
 
     /// Compute formatting_disabled state from previous node.
-    /// Uses self.formatting_disabled as running state, mutating in place
-    /// instead of cloning from arena each time.
+    /// Uses self.formatting_disabled_depth as running state, mutating in place.
+    /// Returns bool (true = disabled) for the Node's formatting_disabled field.
     fn compute_formatting_disabled(
         &mut self,
         token: &Token,
         previous_node: Option<NodeIndex>,
         arena: &[Node],
-    ) -> FmtDisabledVec {
+    ) -> bool {
         if previous_node.is_none() {
-            self.formatting_disabled.clear();
+            self.formatting_disabled_depth = 0;
         }
 
         if matches!(token.token_type, TokenType::FmtOff | TokenType::Data) {
-            // Push a marker index (the value doesn't matter, only non-emptiness is checked)
-            self.formatting_disabled.push(previous_node.unwrap_or(0));
+            self.formatting_disabled_depth += 1;
         }
 
-        if !self.formatting_disabled.is_empty() {
+        if self.formatting_disabled_depth > 0 {
             if let Some(prev_idx) = previous_node {
                 if matches!(
                     arena[prev_idx].token.token_type,
                     TokenType::FmtOn | TokenType::Data
                 ) {
-                    self.formatting_disabled.pop();
+                    self.formatting_disabled_depth -= 1;
                 }
             }
         }
 
-        self.formatting_disabled.clone()
+        self.formatting_disabled_depth > 0
     }
 
     /// Open a bracket (called after node is added to arena with its index).
@@ -459,8 +473,10 @@ impl NodeManager {
             {
                 return Cow::Borrowed(&*token.text);
             }
-            // Use optimized bulk lowercase, then normalize whitespace without Vec
-            let lower = str::to_ascii_lowercase(&token.text);
+            // Lowercase in-place on a String buffer (avoids str::to_ascii_lowercase
+            // which allocates a separate String)
+            let mut lower = String::from(&*token.text);
+            lower.make_ascii_lowercase();
             if !lower.contains(|c: char| c.is_ascii_whitespace()) {
                 return Cow::Owned(lower);
             }
@@ -478,7 +494,9 @@ impl NodeManager {
             if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
                 return Cow::Borrowed(&*token.text);
             }
-            return Cow::Owned(str::to_ascii_lowercase(&token.text));
+            let mut s = String::from(&*token.text);
+            s.make_ascii_lowercase();
+            return Cow::Owned(s);
         }
 
         if !self.case_sensitive_names && tt == TokenType::Name {
@@ -489,7 +507,9 @@ impl NodeManager {
             if token.text.bytes().all(|b| !b.is_ascii_uppercase()) {
                 return Cow::Borrowed(&*token.text);
             }
-            return Cow::Owned(str::to_ascii_lowercase(&token.text));
+            let mut s = String::from(&*token.text);
+            s.make_ascii_lowercase();
+            return Cow::Owned(s);
         }
 
         // Jinja tokens, quoted names, etc.: preserve original text
@@ -499,19 +519,19 @@ impl NodeManager {
     /// Enable formatting (handle fmt:on).
     #[cfg(test)]
     pub fn enable_formatting(&mut self) {
-        self.formatting_disabled.clear();
+        self.formatting_disabled_depth = 0;
     }
 
     /// Disable formatting (handle fmt:off).
     #[cfg(test)]
     pub fn disable_formatting(&mut self) {
-        self.formatting_disabled.push(0);
+        self.formatting_disabled_depth = 1;
     }
 
     /// Check if formatting is currently disabled.
     #[cfg(test)]
     pub fn is_formatting_disabled(&self) -> bool {
-        !self.formatting_disabled.is_empty()
+        self.formatting_disabled_depth > 0
     }
 
     /// Reset state (for new query).
@@ -522,7 +542,7 @@ impl NodeManager {
     pub fn reset(&mut self) {
         self.open_brackets.clear();
         self.open_jinja_blocks.clear();
-        self.formatting_disabled.clear();
+        self.formatting_disabled_depth = 0;
     }
 }
 

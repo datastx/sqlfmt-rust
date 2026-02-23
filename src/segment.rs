@@ -172,8 +172,8 @@ mod tests {
             if idx > 0 { Some(idx - 1) } else { None },
             compact_str::CompactString::new(""),
             compact_str::CompactString::from(val),
-            smallvec::SmallVec::new(),
-            smallvec::SmallVec::new(),
+            0,
+            0,
         ));
         idx
     }
