@@ -1035,3 +1035,24 @@ fn test_fixture_for_update() {
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "For update should be idempotent");
 }
+
+// Test: Complex dbt model with many CTEs, Jinja refs/sources, QUALIFY, window functions
+// This file was causing a stack overflow due to deep recursion in the merger.
+#[test]
+fn test_format_dbt_pharmacy_panels() {
+    let source =
+        std::fs::read_to_string("tests/fixtures/dbt_pharmacy_panels.sql").unwrap();
+    let result = format_string(&source, &default_mode());
+    assert!(
+        result.is_ok(),
+        "Should successfully format dbt_pharmacy_panels.sql without stack overflow: {:?}",
+        result.err()
+    );
+    // Verify idempotency
+    let formatted = result.unwrap();
+    let second = format_string(&formatted, &default_mode()).unwrap();
+    assert_eq!(
+        formatted, second,
+        "dbt_pharmacy_panels.sql formatting should be idempotent"
+    );
+}
