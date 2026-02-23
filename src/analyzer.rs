@@ -590,7 +590,7 @@ impl Analyzer {
 
             let mut line = Line::new(prev);
             line.append_node(idx);
-            if !self.arena[idx].formatting_disabled.is_empty() {
+            if self.arena[idx].formatting_disabled {
                 line.formatting_disabled = true;
             }
             self.line_buffer.push(line);
@@ -610,7 +610,7 @@ impl Analyzer {
         }
 
         for &idx in &self.node_buffer {
-            if !self.arena[idx].formatting_disabled.is_empty() {
+            if self.arena[idx].formatting_disabled {
                 line.formatting_disabled = true;
                 break;
             }
@@ -825,8 +825,13 @@ impl Analyzer {
     }
 
     /// Post-lex validation: check for unmatched closing brackets.
+    /// Jinja `{% if %}`/`{% else %}`/`{% endif %}` branches are alternatives,
+    /// not sequential, so each branch is validated against the depth at the
+    /// block start.
     fn validate_brackets(&self) -> Result<(), SqlfmtError> {
         let mut depth = 0i32;
+        // Stack of (depth_at_block_start, jinja_nesting_level) for {% if %}/{% for %} etc.
+        let mut jinja_depth_stack: Vec<i32> = Vec::new();
         for node in &self.arena {
             match node.token.token_type {
                 TokenType::BracketOpen | TokenType::StatementStart => {
@@ -834,11 +839,26 @@ impl Analyzer {
                 }
                 TokenType::BracketClose | TokenType::StatementEnd => {
                     depth -= 1;
-                    if depth < 0 {
+                    if depth < 0 && jinja_depth_stack.is_empty() {
                         return Err(SqlfmtError::Bracket(format!(
                             "Encountered closing bracket '{}' without a matching opening bracket",
                             node.token.text
                         )));
+                    }
+                }
+                TokenType::JinjaBlockStart => {
+                    jinja_depth_stack.push(depth);
+                }
+                TokenType::JinjaBlockKeyword => {
+                    // {% else %}, {% elif %}: restore depth to block start
+                    if let Some(&saved_depth) = jinja_depth_stack.last() {
+                        depth = saved_depth;
+                    }
+                }
+                TokenType::JinjaBlockEnd => {
+                    // {% endif %}, {% endfor %}: restore depth to block start
+                    if let Some(saved_depth) = jinja_depth_stack.pop() {
+                        depth = saved_depth;
                     }
                 }
                 _ => {}

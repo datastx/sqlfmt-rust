@@ -168,8 +168,8 @@ mod tests {
             None,
             compact_str::CompactString::new(""),
             compact_str::CompactString::from(value),
-            smallvec::SmallVec::new(),
-            smallvec::SmallVec::new(),
+            0,
+            0,
         )
     }
 

@@ -2398,125 +2398,130 @@ fn classify_keyword<'a>(
     (&A_NAME, full_text)
 }
 
+/// Perfect-hash set of unterminated keywords (lowercased).
+static UNTERM_KEYWORDS: phf::Set<&'static str> = phf::phf_set! {
+    "with recursive", "with",
+    "select as struct", "select as value", "select all",
+    "select distinct", "select",
+    "global inner join", "global left outer join", "global left join",
+    "global right outer join", "global right join", "global full outer join",
+    "global full join", "global any join", "global join",
+    "any left outer join", "any left join", "any right outer join", "any right join",
+    "any inner join", "any full outer join", "any full join",
+    "paste join",
+    "natural full outer join", "natural full join", "natural left outer join",
+    "natural left join", "natural right outer join", "natural right join",
+    "natural inner join", "natural join",
+    "cross lateral join", "cross join",
+    "left outer join", "left semi join", "left anti join", "left asof join", "left join",
+    "right outer join", "right semi join", "right anti join", "right join",
+    "full outer join", "full join",
+    "inner join", "semi join", "anti join", "asof left join", "asof join",
+    "positional join", "any join", "lateral join", "join",
+    "lateral view outer", "lateral view", "lateral",
+    "prewhere", "where",
+    "group by", "cluster by", "distribute by", "sort by",
+    "having", "qualify", "window",
+    "order by", "limit",
+    "fetch first", "fetch next",
+    "for no key update", "for key share", "for update", "for share",
+    "when", "then", "else",
+    "partition by",
+    "values", "returning", "into",
+    "match_recognize", "connect", "start with",
+};
+
 /// Check if a (lowercased) keyword is an unterminated keyword.
 fn is_unterm_keyword(kw: &str) -> bool {
-    matches!(
-        kw,
-        "with recursive" | "with"
-        | "select as struct" | "select as value" | "select all"
-        | "select distinct" | "select"
-        // select top N handled by multi-word
-        | "global inner join" | "global left outer join" | "global left join"
-        | "global right outer join" | "global right join" | "global full outer join"
-        | "global full join" | "global any join" | "global join"
-        | "any left outer join" | "any left join" | "any right outer join" | "any right join"
-        | "any inner join" | "any full outer join" | "any full join"
-        | "paste join"
-        | "natural full outer join" | "natural full join" | "natural left outer join"
-        | "natural left join" | "natural right outer join" | "natural right join"
-        | "natural inner join" | "natural join"
-        | "cross lateral join" | "cross join"
-        | "left outer join" | "left semi join" | "left anti join" | "left asof join" | "left join"
-        | "right outer join" | "right semi join" | "right anti join" | "right join"
-        | "full outer join" | "full join"
-        | "inner join" | "semi join" | "anti join" | "asof left join" | "asof join"
-        | "positional join" | "any join" | "lateral join" | "join"
-        | "lateral view outer" | "lateral view" | "lateral"
-        | "prewhere" | "where"
-        | "group by" | "cluster by" | "distribute by" | "sort by"
-        | "having" | "qualify" | "window"
-        | "order by" | "limit"
-        | "fetch first" | "fetch next"
-        | "for no key update" | "for key share" | "for update" | "for share"
-        | "when" | "then" | "else"
-        | "partition by"
-        | "values" | "returning" | "into"
-        | "match_recognize" | "connect" | "start with"
-    )
+    UNTERM_KEYWORDS.contains(kw)
 }
+
+/// Perfect-hash set of word operators (lowercased).
+static WORD_OPERATORS: phf::Set<&'static str> = phf::phf_set! {
+    "is not distinct from",
+    "is distinct from",
+    "not similar to",
+    "similar to",
+    "not ilike all",
+    "not ilike any",
+    "not like all",
+    "not like any",
+    "ilike all",
+    "ilike any",
+    "like all",
+    "like any",
+    "not between",
+    "not ilike",
+    "not like",
+    "not rlike",
+    "not regexp",
+    "not exists",
+    "global not in",
+    "global in",
+    "not in",
+    "is not",
+    "grouping sets",
+    "within group",
+    "respect nulls",
+    "ignore nulls",
+    "nulls first",
+    "nulls last",
+    "as",
+    "between",
+    "cube",
+    "exists",
+    "filter",
+    "ilike",
+    "isnull",
+    "in",
+    "interval",
+    "is",
+    "like",
+    "notnull",
+    "over",
+    "pivot",
+    "regexp",
+    "rlike",
+    "rollup",
+    "some",
+    "tablesample",
+    "unpivot",
+    "asc",
+    "desc",
+};
 
 /// Check if it's a word operator.
 fn is_word_operator(kw: &str) -> bool {
-    matches!(
-        kw,
-        "is not distinct from"
-            | "is distinct from"
-            | "not similar to"
-            | "similar to"
-            | "not ilike all"
-            | "not ilike any"
-            | "not like all"
-            | "not like any"
-            | "ilike all"
-            | "ilike any"
-            | "like all"
-            | "like any"
-            | "not between"
-            | "not ilike"
-            | "not like"
-            | "not rlike"
-            | "not regexp"
-            | "not exists"
-            | "global not in"
-            | "global in"
-            | "not in"
-            | "is not"
-            | "grouping sets"
-            | "within group"
-            | "respect nulls"
-            | "ignore nulls"
-            | "nulls first"
-            | "nulls last"
-            | "as"
-            | "between"
-            | "cube"
-            | "exists"
-            | "filter"
-            | "ilike"
-            | "isnull"
-            | "in"
-            | "interval"
-            | "is"
-            | "like"
-            | "notnull"
-            | "over"
-            | "pivot"
-            | "regexp"
-            | "rlike"
-            | "rollup"
-            | "some"
-            | "tablesample"
-            | "unpivot"
-            | "asc"
-            | "desc"
-    )
+    WORD_OPERATORS.contains(kw)
 }
+
+/// Perfect-hash set of set operators (lowercased).
+static SET_OPERATORS: phf::Set<&'static str> = phf::phf_set! {
+    "union all by name",
+    "union by name",
+    "union all",
+    "union distinct",
+    "intersect all",
+    "intersect distinct",
+    "except all",
+    "except distinct",
+    "union all corresponding by",
+    "union corresponding by",
+    "union strict corresponding",
+    "union corresponding",
+    "intersect all corresponding",
+    "intersect corresponding",
+    "except all corresponding",
+    "except corresponding",
+    "union",
+    "intersect",
+    "except",
+    "minus",
+};
 
 /// Check if it's a set operator.
 fn is_set_operator(kw: &str) -> bool {
-    matches!(
-        kw,
-        "union all by name"
-            | "union by name"
-            | "union all"
-            | "union distinct"
-            | "intersect all"
-            | "intersect distinct"
-            | "except all"
-            | "except distinct"
-            | "union all corresponding by"
-            | "union corresponding by"
-            | "union strict corresponding"
-            | "union corresponding"
-            | "intersect all corresponding"
-            | "intersect corresponding"
-            | "except all corresponding"
-            | "except corresponding"
-            | "union"
-            | "intersect"
-            | "except"
-            | "minus"
-    )
+    SET_OPERATORS.contains(kw)
 }
 
 /// Check if it's a CREATE/ALTER FUNCTION DDL keyword.
@@ -2532,56 +2537,21 @@ fn is_warehouse_ddl(kw: &str) -> bool {
         || kw.starts_with("alter") && kw.contains("warehouse")
 }
 
+/// Perfect-hash set of unsupported DDL first words (lowercased).
+static UNSUPPORTED_DDL: phf::Set<&'static str> = phf::phf_set! {
+    "delete", "insert", "update", "merge", "truncate", "rename", "unset",
+    "use", "execute", "begin", "commit", "rollback", "copy", "clone",
+    "cluster", "deallocate", "declare", "discard", "do", "export",
+    "handler", "import", "lock", "move", "prepare", "reassign", "repair",
+    "security", "unload", "validate", "vacuum", "analyze", "refresh",
+    "list", "remove", "get", "put", "describe", "show", "comment",
+    "add", "undrop", "cache", "clear",
+};
+
 /// Check if first word starts an unsupported DDL.
 /// Note: create/alter/drop and grant/revoke are handled separately above.
 fn is_unsupported_ddl(first_word: &str) -> bool {
-    matches!(
-        first_word,
-        "delete"
-            | "insert"
-            | "update"
-            | "merge"
-            | "truncate"
-            | "rename"
-            | "unset"
-            | "use"
-            | "execute"
-            | "begin"
-            | "commit"
-            | "rollback"
-            | "copy"
-            | "clone"
-            | "cluster"
-            | "deallocate"
-            | "declare"
-            | "discard"
-            | "do"
-            | "export"
-            | "handler"
-            | "import"
-            | "lock"
-            | "move"
-            | "prepare"
-            | "reassign"
-            | "repair"
-            | "security"
-            | "unload"
-            | "validate"
-            | "vacuum"
-            | "analyze"
-            | "refresh"
-            | "list"
-            | "remove"
-            | "get"
-            | "put"
-            | "describe"
-            | "show"
-            | "comment"
-            | "add"
-            | "undrop"
-            | "cache"
-            | "clear"
-    )
+    UNSUPPORTED_DDL.contains(first_word)
 }
 
 /// Try to scan a frame clause: "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" etc.

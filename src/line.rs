@@ -469,8 +469,8 @@ mod tests {
             prev,
             compact_str::CompactString::from(prefix),
             compact_str::CompactString::from(value),
-            smallvec::SmallVec::new(),
-            smallvec::SmallVec::new(),
+            0,
+            0,
         ));
         idx
     }
@@ -488,7 +488,7 @@ mod tests {
     fn test_line_depth() {
         let mut arena = Vec::new();
         let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-        arena[idx].open_brackets = smallvec::smallvec![99]; // 1 open bracket
+        arena[idx].bracket_depth = 1;
         let mut line = Line::new(None);
         line.append_node(idx);
         assert_eq!(line.depth(&arena), (1, 0));
@@ -673,7 +673,7 @@ mod tests {
     fn test_indentation_with_depth() {
         let mut arena = Vec::new();
         let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-        arena[idx].open_brackets = smallvec::smallvec![99]; // depth 1
+        arena[idx].bracket_depth = 1; // depth 1
         let mut line = Line::new(None);
         line.append_node(idx);
         assert_eq!(line.indentation(&arena), "    "); // 4 spaces per depth level

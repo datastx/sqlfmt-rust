@@ -262,12 +262,8 @@ fn split_line_at_jinja(line: Line, split_pos: usize, arena: &mut Vec<Node>) -> (
         prev_idx,
         CompactString::new(""),
         CompactString::from("\n"),
-        prev_idx
-            .map(|i| arena[i].open_brackets.clone())
-            .unwrap_or_default(),
-        prev_idx
-            .map(|i| arena[i].open_jinja_blocks.clone())
-            .unwrap_or_default(),
+        prev_idx.map(|i| arena[i].bracket_depth).unwrap_or(0),
+        prev_idx.map(|i| arena[i].jinja_depth).unwrap_or(0),
     );
     let nl_idx = arena.len();
     arena.push(nl_node);
@@ -331,8 +327,8 @@ fn find_jinja_block_end(
 /// Adjust bracket depth of a line's first content node to a target depth.
 fn adjust_bracket_depth(line: &Line, target_depth: usize, arena: &mut [Node]) {
     if let Some(node_idx) = line.first_content_node_idx(arena) {
-        while arena[node_idx].open_brackets.len() > target_depth {
-            arena[node_idx].open_brackets.pop();
+        if (arena[node_idx].bracket_depth as usize) > target_depth {
+            arena[node_idx].bracket_depth = target_depth as u16;
         }
     }
 }
