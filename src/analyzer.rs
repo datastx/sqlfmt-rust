@@ -3,7 +3,7 @@ use memchr::memchr;
 use crate::action::Action;
 use crate::comment::Comment;
 use crate::error::SqlfmtError;
-use crate::lexer::{self, LexState};
+use crate::lexer::{self, scan_dollar_string, LexState};
 use crate::line::Line;
 use crate::node::{Node, NodeIndex};
 use crate::node_manager::NodeManager;
@@ -796,6 +796,13 @@ impl Analyzer {
             {
                 i = skip_jinja_block(bytes, i);
                 continue;
+            }
+            if bytes[i] == b'$' {
+                let ds_len = scan_dollar_string(&bytes[i..]);
+                if ds_len > 0 {
+                    i += ds_len;
+                    continue;
+                }
             }
             if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
                 in_comment = true;

@@ -459,6 +459,10 @@ golden_test_clickhouse!(
     golden_unformatted_220_clickhouse_joins,
     "tests/data/unformatted/220_clickhouse_joins.sql"
 );
+golden_test!(
+    golden_unformatted_221_dbt_config_dollar_quoted,
+    "tests/data/unformatted/221_dbt_config_dollar_quoted.sql"
+);
 
 // =============================================================================
 // Unformatted golden tests — 300-series (Jinja formatting)
