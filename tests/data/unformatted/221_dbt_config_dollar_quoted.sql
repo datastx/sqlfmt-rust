@@ -46,19 +46,34 @@ SELECT e.event_id AS event_id
 }}
 {% set app_comment_pattern = "'-- App Context'" %}
 select
-    e.event_id as event_id,
-    e.event_type as event_type,
-    e.user_id as user_id,
-    e.created_at as created_at,
-    case
+    e.event_id as event_id
+    , e.event_type as event_type
+    , e.user_id as user_id
+    , e.created_at as created_at
+    , case
         when e.source = 'api' then 'api' when e.source = 'web' then 'web' else 'other'
-    end as event_source,
-    try_parse_json(
-        regexp_substr(e.payload, $$/\*\s*({.*"app":.*})\s*\*/$$, 1, 1, 'ie')
-    ) as event_meta,
-    e.duration_ms as duration_ms
+    end as event_source
+    , try_parse_json(
+        regexp_substr(
+            e.payload
+            , $$/\*\s*({.*"app":.*})\s*\*/$$
+            , 1
+            , 1
+            , 'ie'
+        )
+    ) as event_meta
+    , e.duration_ms as duration_ms
 from {{ source("app", "events") }} as e
 left join {{ ref("dim_users") }} as u on e.user_id = u.user_id
 {% if is_incremental() %}
-    where e.created_at > (select dateadd(day, -2, max(created_at)) from {{ this }})
+    where
+        e.created_at > (
+            select
+                dateadd(
+                    day
+                    , -2
+                    , max(created_at)
+                )
+            from {{ this }}
+        )
 {% endif %}

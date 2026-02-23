@@ -8,13 +8,15 @@ from my_table as foobar
 select
     array_agg(distinct foobar.my_special_foo) within group (
         order by foobar.another_foo
-    ) as a_very_long_alias,
-    array_agg(
+    ) as a_very_long_alias
+    , array_agg(
         distinct foobar.my_special_foo || foobar.another_very_long_foo
-    ) within group (order by foobar.another_foo desc) as a_very_long_alias,
+    ) within group (order by foobar.another_foo desc) as a_very_long_alias
+    ,
     array_agg(distinct foobar.my_special_foo) within group (
         order by foobar.another_foo
-    ) filter (where barbar = "bazbaz" and bazbaz = "quxqux") as something_else,
+    ) filter (where barbar = "bazbaz" and bazbaz = "quxqux") as something_else
+    ,
     array_agg(distinct foobar.my_special_foo) within group (
         order by foobar.another_foo
     ) filter (

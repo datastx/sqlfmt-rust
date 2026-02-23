@@ -17,15 +17,20 @@ where
     and lat between -90 and 90
 )))))__SQLFMT_OUTPUT__(((((
 select
-    radio,
-    mcc,
-    net as mnc,
-    area as lac,
-    cell % 65536 as cid,
-    cell / 65536 as rnc,
-    cell as long_cid,
-    lon,
-    lat
+    radio
+    , mcc
+    ,
+    net as mnc
+    ,
+    area as lac
+    , cell
+    % 65536 as cid
+    , cell
+    / 65536 as rnc
+    ,
+    cell as long_cid
+    , lon
+    , lat
 from towershift
 where
     radio != 'CDMA'

@@ -31,9 +31,12 @@ set warehouse_size = 'XSMALL'
 ;
 alter warehouse if exists foo
 set tag
-    'foobar' = 'baz',
-    'another_really_long_tag_name' = 'really_very_long_tag_value_quxxxxxxxxxxxxxxxxxxx',
-    'bar' = 'baz'
+    'foobar'
+    = 'baz'
+    , 'another_really_long_tag_name'
+    = 'really_very_long_tag_value_quxxxxxxxxxxxxxxxxxxx'
+    , 'bar'
+    = 'baz'
 ;
 
 alter warehouse foo

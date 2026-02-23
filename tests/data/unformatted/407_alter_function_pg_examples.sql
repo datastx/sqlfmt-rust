@@ -26,7 +26,10 @@ alter function sqrt(integer)
 depends on extension mathlib
 ;
 alter function check_password(text)
-set search_path = admin, pg_temp
+set
+    search_path
+    = admin
+    , pg_temp
 ;
 alter function check_password(text)
 reset search_path
@@ -34,11 +37,11 @@ reset search_path
 drop function sqrt(integer)
 ;
 drop function
-    square_root(integer),
-    square_root(bigint),
-    square_root(float),
-    square_root(numeric),
-    square_root(money)
+    square_root(integer)
+    , square_root(bigint)
+    , square_root(float)
+    , square_root(numeric)
+    , square_root(money)
 cascade
 ;
 drop function update_employee_salaries

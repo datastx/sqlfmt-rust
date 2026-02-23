@@ -34,23 +34,27 @@ with
     table_a as (
         select
             /* Notice that this select statement can fit on a single line without comments */
-            col1,
-            col2,  -- col2
+            col1
+            , col2
+            ,  -- col2
             /* Special column */
-            special_column,
-        from {{ ref("table_a") }}
-    ),
+            special_column
+            , from {{ ref("table_a") }}
+    )
+
     /* Some interesting comments above a CTE with a leading comma */
-    table_b as (select * from {{ ref("table_b") }})
+    , table_b as (select * from {{ ref("table_b") }})
 
 select *
-from table_a, table_b
+from
+    table_a
+    , table_b
 ;
 
 select
-    1,
+    1
     -- two
-    2,  -- two inline
+    , 2  -- two inline
     -- three
-    3,  -- three inline
-    4  -- four inline
+    , 3  -- three inline
+    , 4  -- four inline

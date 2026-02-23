@@ -35,21 +35,28 @@ with
         select a::float + b::float as total
         from {{ ref("source_table") }}
         where created_at > '{{ var("start_date") }}'
-    ),
-    dynamic_cols as (
+    )
+    , dynamic_cols as (
         {% set columns = adapter.get_columns_in_relation(ref("source_table")) %}
         {% set skip_cols = ["INTERNAL_ID", "UPDATED_AT"] %}
         {% set special_cols = ["LEGACY_CODE"] %}
         select
             concat_ws(
-                '|',
+                '|'
+                ,
                 {%- for col in columns if col.name not in skip_cols %}
                     ifnull(
                     {%- if col.name in special_cols %}
-                            '19700101',
-                            ''
+                            '19700101'
+                            , ''
                         )
-                        {%- else %}replace({{ col.name }}, ',', ''), ''
+                        {%- else %}
+                            replace(
+                                {{ col.name }}
+                                , ','
+                                , ''
+                            )
+                            , ''
                         )
                     {% endif %}
                         {%- if not loop.last %} {{ "," }} {% endif %}

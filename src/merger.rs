@@ -155,32 +155,44 @@ impl LineMerger {
         }
     }
 
-    /// Convert leading commas to trailing commas by merging standalone comma
-    /// lines with the preceding non-blank content line.
-    /// Python sqlfmt always uses trailing comma style.
+    /// Merge standalone comma lines with the FOLLOWING content line.
+    /// Leading-comma style: `, next_item` on one line.
     /// Don't merge commas with Jinja block tags ({% if %}, {% else %}, etc.)
     /// as the comma is part of the block's content, not the tag itself.
     /// Uses a mark-and-sweep approach to avoid O(n²) from Vec::remove().
     fn fix_standalone_commas(&self, lines: &mut Vec<Line>, arena: &[Node]) {
         let len = lines.len();
         let mut remove = vec![false; len];
-        let mut last_content_idx: Option<usize> = None;
 
         for i in 0..len {
             if remove[i] {
                 continue;
             }
-            if lines[i].is_standalone_comma(arena) && i > 0 {
-                if let Some(pi) = last_content_idx {
-                    if !is_jinja_block_line(&lines[pi], arena) {
-                        let to_merge = vec![lines[pi].clone(), lines[i].clone()];
+            if lines[i].is_standalone_comma(arena) {
+                // Find next non-blank content line
+                let mut next_content_idx: Option<usize> = None;
+                for j in (i + 1)..len {
+                    if !remove[j]
+                        && !lines[j].is_blank_line(arena)
+                        && !lines[j].is_standalone_comment_line(arena)
+                    {
+                        next_content_idx = Some(j);
+                        break;
+                    }
+                }
+                if let Some(ni) = next_content_idx {
+                    if !is_jinja_block_line(&lines[ni], arena)
+                        && !line_has_interior_split_points(&lines[ni], arena)
+                    {
+                        let to_merge = vec![lines[i].clone(), lines[ni].clone()];
                         if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
                             if let Some(merged_line) =
                                 merged.into_iter().find(|l| !l.is_blank_line(arena))
                             {
-                                lines[pi] = merged_line;
+                                lines[ni] = merged_line;
                                 remove[i] = true;
-                                for j in (pi + 1)..i {
+                                // Remove blank lines between comma and next content
+                                for j in (i + 1)..ni {
                                     if lines[j].is_blank_line(arena) {
                                         remove[j] = true;
                                     }
@@ -190,10 +202,6 @@ impl LineMerger {
                         }
                     }
                 }
-            }
-
-            if !lines[i].is_blank_line(arena) && !lines[i].is_standalone_comment_line(arena) {
-                last_content_idx = Some(i);
             }
         }
 
@@ -290,6 +298,13 @@ impl LineMerger {
                     has_inline_comment_above = true;
                 }
             } else if has_inline_comment_above && !line.is_standalone_comma(arena) && !is_blank {
+                return Err(ControlFlow::CannotMerge);
+            }
+
+            // Leading-comma style: never merge across comma-starting lines.
+            // Must check BEFORE setting first_content_seen so that the first
+            // content line of a segment (e.g., `, sum(`) is not blocked.
+            if is_content && first_content_seen && line.starts_with_comma(arena) {
                 return Err(ControlFlow::CannotMerge);
             }
 
@@ -512,6 +527,10 @@ impl LineMerger {
             });
         }
 
+        // LATERAL: with leading commas, the comma is on the LATERAL line itself
+        // (e.g., `, lateral flatten(...)`) so check if the head line starts with comma
+        // and the second content node is LATERAL, or if the first content is LATERAL
+        // and the previous segment's tail ends with comma.
         if first.token.token_type == crate::token::TokenType::UntermKeyword
             && first.value.eq_ignore_ascii_case("lateral")
         {
@@ -524,6 +543,16 @@ impl LineMerger {
                 return false;
             }
             return self.create_merged_line(&segment.lines, arena).is_ok();
+        }
+        // Leading-comma style: `, lateral` — first content is comma, second is lateral
+        if first.is_comma() {
+            if let Some(second) = line.second_content_node(arena) {
+                if second.token.token_type == crate::token::TokenType::UntermKeyword
+                    && second.value.eq_ignore_ascii_case("lateral")
+                {
+                    return self.create_merged_line(&segment.lines, arena).is_ok();
+                }
+            }
         }
 
         false
@@ -750,6 +779,34 @@ impl LineMerger {
     }
 }
 
+/// Check if a line has interior nodes that would cause the splitter to re-split
+/// if the line were prepended with a comma. This prevents fix_standalone_commas
+/// from creating non-idempotent output.
+fn line_has_interior_split_points(line: &Line, arena: &[Node]) -> bool {
+    let mut first_content = true;
+    for &idx in &line.nodes {
+        let node = &arena[idx];
+        if node.is_newline() {
+            continue;
+        }
+        if first_content {
+            first_content = false;
+            continue;
+        }
+        // These would cause the splitter to split before them
+        if node.is_operator(arena) && !node.is_bracket_operator(arena) {
+            return true;
+        }
+        if node.is_boolean_operator() {
+            return true;
+        }
+        if node.is_unterm_keyword() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Check if a line starts with a Jinja block tag.
 fn is_jinja_block_line(line: &Line, arena: &[Node]) -> bool {
     line.first_content_node(arena)
@@ -923,11 +980,11 @@ mod tests {
 
     #[test]
     fn test_create_merged_line_basic() {
-        // Two short columns should merge onto one SELECT line
+        // Two short columns should stay split with leading commas
         let result = format_sql("SELECT\n    a,\n    b\n");
         assert!(
-            result.contains("a,"),
-            "Short columns should merge: {}",
+            result.contains(", b"),
+            "Short columns should use leading commas: {}",
             result
         );
     }

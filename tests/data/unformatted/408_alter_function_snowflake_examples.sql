@@ -20,5 +20,9 @@ set api_integration = api_integration_2
 alter function function5(number)
 set max_batch_rows = 100
 ;
-drop function multiply(number, number)
+drop function
+    multiply(
+        number
+        , number
+    )
 ;

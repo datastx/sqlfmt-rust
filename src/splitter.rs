@@ -10,8 +10,8 @@ use crate::token::{Token, TokenType};
 ///
 /// Mirrors the Python sqlfmt LineSplitter exactly:
 /// - Iterates node-by-node with split_before/split_after flags
-/// - Splits AFTER commas, opening brackets, keywords, query dividers
-/// - Splits BEFORE operators, keywords, closing brackets, multiline jinja
+/// - Splits AFTER opening brackets, keywords, query dividers
+/// - Splits BEFORE commas, operators, keywords, closing brackets, multiline jinja
 /// - Uses iterative (not recursive) approach to handle very long lines
 pub struct LineSplitter;
 
@@ -135,6 +135,11 @@ impl LineSplitter {
             return true;
         }
 
+        // Leading-comma style: split BEFORE commas so they lead the next line
+        if node.is_comma() {
+            return true;
+        }
+
         false
     }
 
@@ -162,9 +167,6 @@ impl LineSplitter {
     fn maybe_split_after(&self, node_idx: NodeIndex, arena: &[Node]) -> (bool, bool) {
         let node = &arena[node_idx];
 
-        if node.is_comma() {
-            return (true, false);
-        }
         // BUT NOT after angle brackets (< for type constructors like array<int64>).
         // Angle bracket content is typically short and should stay on the same line.
         if node.is_opening_bracket() {
@@ -230,8 +232,6 @@ impl LineSplitter {
             (comments, Vec::new())
         } else if comments.is_empty() {
             (Vec::new(), Vec::new())
-        } else if new_nodes.len() == 1 && arena[new_nodes[0]].token.token_type == TokenType::Comma {
-            (Vec::new(), comments)
         } else {
             // Use slice contains() instead of HashSet for small node sets
             let remaining_nodes: &[NodeIndex] = if index < line.nodes.len() {
@@ -365,7 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn test_split_after_comma() {
+    fn test_split_before_comma() {
+        // Leading-comma style: split BEFORE the comma
         let mut arena = Vec::new();
         let a = make_node(&mut arena, TokenType::Name, "a", "");
         let comma = make_node(&mut arena, TokenType::Comma, ",", "");
@@ -382,6 +383,8 @@ mod tests {
             "Expected at least 2 lines, got {}",
             result.len()
         );
+        // First line should have "a" (no comma)
+        // Second line should start with comma
     }
 
     #[test]

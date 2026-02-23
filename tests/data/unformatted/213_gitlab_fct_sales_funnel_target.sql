@@ -170,21 +170,26 @@ For FY23 and beyond, targets in the sheetload file were set at the user_segment_
             ("date_details_source", "date_details_source"),
         ]
     )
-}},
-date as (
+}}
 
-    select distinct fiscal_month_name_fy, fiscal_year, first_day_of_month
+, date as (
+
+    select distinct
+        fiscal_month_name_fy
+        , fiscal_year
+        , first_day_of_month
     from date_details_source
 
-),
-target_matrix as (
+)
+, target_matrix as (
 
     select
-        sheetload_sales_funnel_targets_matrix_source.*,
-        date.first_day_of_month,
-        date.fiscal_year,
-        {{ get_keyed_nulls("sales_qualified_source.dim_sales_qualified_source_id") }}
-        as dim_sales_qualified_source_id,
+        sheetload_sales_funnel_targets_matrix_source.*
+        , date.first_day_of_month
+        , date.fiscal_year
+        , {{ get_keyed_nulls("sales_qualified_source.dim_sales_qualified_source_id") }}
+        as dim_sales_qualified_source_id
+        ,
         {{ get_keyed_nulls("order_type.dim_order_type_id") }} as dim_order_type_id
     from {{ ref("sheetload_sales_funnel_targets_matrix_source") }}
     left join
@@ -214,8 +219,8 @@ target_matrix as (
             )
         }} = {{ sales_funnel_text_slugify("order_type.order_type_name") }}
 
-),
-fy22_user_hierarchy as (
+)
+, fy22_user_hierarchy as (
     /* 
 For FY22, targets in the sheetload file were set at the user_area grain, so we join to the stamped hierarchy on the user_area. We also want to find the last user_area in the fiscal year
 because if there were multiple hierarchies for this user_area, the last one created is assumed to be the correct version. It is necessary to have a 1:1 relationship between area in the target
@@ -225,8 +230,8 @@ sheetload and user_area in the hierarchy so the targets do not fan out.
     from sfdc_user_hierarchy_stamped
     where fiscal_year = 2022 and is_last_user_area_in_fiscal_year = 1
 
-),
-fy23_and_beyond_user_hierarchy as (
+)
+, fy23_and_beyond_user_hierarchy as (
     /* 
 For FY23 and beyond, targets in the sheetload file were set at the user_segment_geo_region_area grain, so we join to the stamped hierarchy on the user_segment_geo_region_area.
 */
@@ -234,28 +239,28 @@ For FY23 and beyond, targets in the sheetload file were set at the user_segment_
     from sfdc_user_hierarchy_stamped
     where fiscal_year > 2022 and is_last_user_hierarchy_in_fiscal_year = 1
 
-),
-unioned_targets as (
+)
+, unioned_targets as (
 
     select
-        target_matrix.kpi_name,
-        target_matrix.first_day_of_month,
-        target_matrix.dim_sales_qualified_source_id,
-        target_matrix.opportunity_source,
-        target_matrix.dim_order_type_id,
-        target_matrix.order_type,
-        target_matrix.fiscal_year,
-        target_matrix.allocated_target,
-        fy22_user_hierarchy.crm_opp_owner_sales_segment_geo_region_area_stamped,
-        fy22_user_hierarchy.dim_crm_user_hierarchy_stamped_id,
-        fy22_user_hierarchy.dim_crm_opp_owner_sales_segment_stamped_id,
-        fy22_user_hierarchy.crm_opp_owner_sales_segment_stamped,
-        fy22_user_hierarchy.dim_crm_opp_owner_geo_stamped_id,
-        fy22_user_hierarchy.crm_opp_owner_geo_stamped,
-        fy22_user_hierarchy.dim_crm_opp_owner_region_stamped_id,
-        fy22_user_hierarchy.crm_opp_owner_region_stamped,
-        fy22_user_hierarchy.dim_crm_opp_owner_area_stamped_id,
-        fy22_user_hierarchy.crm_opp_owner_area_stamped
+        target_matrix.kpi_name
+        , target_matrix.first_day_of_month
+        , target_matrix.dim_sales_qualified_source_id
+        , target_matrix.opportunity_source
+        , target_matrix.dim_order_type_id
+        , target_matrix.order_type
+        , target_matrix.fiscal_year
+        , target_matrix.allocated_target
+        , fy22_user_hierarchy.crm_opp_owner_sales_segment_geo_region_area_stamped
+        , fy22_user_hierarchy.dim_crm_user_hierarchy_stamped_id
+        , fy22_user_hierarchy.dim_crm_opp_owner_sales_segment_stamped_id
+        , fy22_user_hierarchy.crm_opp_owner_sales_segment_stamped
+        , fy22_user_hierarchy.dim_crm_opp_owner_geo_stamped_id
+        , fy22_user_hierarchy.crm_opp_owner_geo_stamped
+        , fy22_user_hierarchy.dim_crm_opp_owner_region_stamped_id
+        , fy22_user_hierarchy.crm_opp_owner_region_stamped
+        , fy22_user_hierarchy.dim_crm_opp_owner_area_stamped_id
+        , fy22_user_hierarchy.crm_opp_owner_area_stamped
     from target_matrix
     left join
         fy22_user_hierarchy
@@ -270,24 +275,25 @@ unioned_targets as (
     union all
 
     select
-        target_matrix.kpi_name,
-        target_matrix.first_day_of_month,
-        target_matrix.dim_sales_qualified_source_id,
-        target_matrix.opportunity_source,
-        target_matrix.dim_order_type_id,
-        target_matrix.order_type,
-        target_matrix.fiscal_year,
-        target_matrix.allocated_target,
-        fy23_and_beyond_user_hierarchy.crm_opp_owner_sales_segment_geo_region_area_stamped,
-        fy23_and_beyond_user_hierarchy.dim_crm_user_hierarchy_stamped_id,
-        fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_sales_segment_stamped_id,
-        fy23_and_beyond_user_hierarchy.crm_opp_owner_sales_segment_stamped,
-        fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_geo_stamped_id,
-        fy23_and_beyond_user_hierarchy.crm_opp_owner_geo_stamped,
-        fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_region_stamped_id,
-        fy23_and_beyond_user_hierarchy.crm_opp_owner_region_stamped,
-        fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_area_stamped_id,
-        fy23_and_beyond_user_hierarchy.crm_opp_owner_area_stamped
+        target_matrix.kpi_name
+        , target_matrix.first_day_of_month
+        , target_matrix.dim_sales_qualified_source_id
+        , target_matrix.opportunity_source
+        , target_matrix.dim_order_type_id
+        , target_matrix.order_type
+        , target_matrix.fiscal_year
+        , target_matrix.allocated_target
+        ,
+        fy23_and_beyond_user_hierarchy.crm_opp_owner_sales_segment_geo_region_area_stamped
+        , fy23_and_beyond_user_hierarchy.dim_crm_user_hierarchy_stamped_id
+        , fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_sales_segment_stamped_id
+        , fy23_and_beyond_user_hierarchy.crm_opp_owner_sales_segment_stamped
+        , fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_geo_stamped_id
+        , fy23_and_beyond_user_hierarchy.crm_opp_owner_geo_stamped
+        , fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_region_stamped_id
+        , fy23_and_beyond_user_hierarchy.crm_opp_owner_region_stamped
+        , fy23_and_beyond_user_hierarchy.dim_crm_opp_owner_area_stamped_id
+        , fy23_and_beyond_user_hierarchy.crm_opp_owner_area_stamped
     from target_matrix
     left join
         fy23_and_beyond_user_hierarchy
@@ -301,8 +307,8 @@ unioned_targets as (
         and target_matrix.fiscal_year = fy23_and_beyond_user_hierarchy.fiscal_year
     where target_matrix.fiscal_year > 2022
 
-),
-final_targets as (
+)
+, final_targets as (
 
     select
 
@@ -318,41 +324,43 @@ final_targets as (
                 ]
             )
         }}
-        as sales_funnel_target_id,
-        unioned_targets.kpi_name,
-        unioned_targets.first_day_of_month,
-        unioned_targets.fiscal_year,
-        unioned_targets.opportunity_source as sales_qualified_source,
-        unioned_targets.dim_sales_qualified_source_id,
-        unioned_targets.order_type,
-        unioned_targets.dim_order_type_id,
-        unioned_targets.crm_opp_owner_sales_segment_geo_region_area_stamped
-        as crm_user_sales_segment_geo_region_area,
-        coalesce(
-            sfdc_user_hierarchy_live.dim_crm_user_hierarchy_live_id,
-            unioned_targets.dim_crm_user_hierarchy_stamped_id
-        ) as dim_crm_user_hierarchy_live_id,
-        coalesce(
-            sfdc_user_hierarchy_live.dim_crm_user_sales_segment_id,
-            unioned_targets.dim_crm_opp_owner_sales_segment_stamped_id
-        ) as dim_crm_user_sales_segment_id,
-        coalesce(
-            sfdc_user_hierarchy_live.dim_crm_user_geo_id,
-            unioned_targets.dim_crm_opp_owner_geo_stamped_id
-        ) as dim_crm_user_geo_id,
-        coalesce(
-            sfdc_user_hierarchy_live.dim_crm_user_region_id,
-            unioned_targets.dim_crm_opp_owner_region_stamped_id
-        ) as dim_crm_user_region_id,
-        coalesce(
-            sfdc_user_hierarchy_live.dim_crm_user_area_id,
-            unioned_targets.dim_crm_opp_owner_area_stamped_id
-        ) as dim_crm_user_area_id,
-        unioned_targets.dim_crm_user_hierarchy_stamped_id,
-        unioned_targets.dim_crm_opp_owner_sales_segment_stamped_id,
-        unioned_targets.dim_crm_opp_owner_geo_stamped_id,
-        unioned_targets.dim_crm_opp_owner_region_stamped_id,
-        unioned_targets.dim_crm_opp_owner_area_stamped_id,
+        as sales_funnel_target_id
+        , unioned_targets.kpi_name
+        , unioned_targets.first_day_of_month
+        , unioned_targets.fiscal_year
+        ,
+        unioned_targets.opportunity_source as sales_qualified_source
+        , unioned_targets.dim_sales_qualified_source_id
+        , unioned_targets.order_type
+        , unioned_targets.dim_order_type_id
+        , unioned_targets.crm_opp_owner_sales_segment_geo_region_area_stamped
+        as crm_user_sales_segment_geo_region_area
+        , coalesce(
+            sfdc_user_hierarchy_live.dim_crm_user_hierarchy_live_id
+            , unioned_targets.dim_crm_user_hierarchy_stamped_id
+        ) as dim_crm_user_hierarchy_live_id
+        , coalesce(
+            sfdc_user_hierarchy_live.dim_crm_user_sales_segment_id
+            , unioned_targets.dim_crm_opp_owner_sales_segment_stamped_id
+        ) as dim_crm_user_sales_segment_id
+        , coalesce(
+            sfdc_user_hierarchy_live.dim_crm_user_geo_id
+            , unioned_targets.dim_crm_opp_owner_geo_stamped_id
+        ) as dim_crm_user_geo_id
+        , coalesce(
+            sfdc_user_hierarchy_live.dim_crm_user_region_id
+            , unioned_targets.dim_crm_opp_owner_region_stamped_id
+        ) as dim_crm_user_region_id
+        , coalesce(
+            sfdc_user_hierarchy_live.dim_crm_user_area_id
+            , unioned_targets.dim_crm_opp_owner_area_stamped_id
+        ) as dim_crm_user_area_id
+        , unioned_targets.dim_crm_user_hierarchy_stamped_id
+        , unioned_targets.dim_crm_opp_owner_sales_segment_stamped_id
+        , unioned_targets.dim_crm_opp_owner_geo_stamped_id
+        , unioned_targets.dim_crm_opp_owner_region_stamped_id
+        , unioned_targets.dim_crm_opp_owner_area_stamped_id
+        ,
         sum(unioned_targets.allocated_target) as allocated_target
 
     from unioned_targets

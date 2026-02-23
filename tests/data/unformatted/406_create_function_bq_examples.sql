@@ -37,12 +37,20 @@ AS
 -- COPYRIGHT GOOGLE
 -- SEE
 -- https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#create_function_statement
-create function mydataset.multiply_inputs(x float64, y float64)
+create function
+    mydataset.multiply_inputs(
+        x float64
+        , y float64
+    )
 returns float64
 as (x * y)
 ;
 
-create temp function multiplyinputs(x float64, y float64)
+create temp function
+    multiplyinputs(
+        x float64
+        , y float64
+    )
 returns float64
 language js
 as r"""
@@ -50,11 +58,24 @@ as r"""
 """
 ;
 
-select multiplyinputs(a, b)
-from (select 3 as a, 2 as b)
+select
+    multiplyinputs(
+        a
+        , b
+    )
+from
+    (
+        select
+            3 as a
+            , 2 as b
+    )
 ;
 
-create function mydataset.remote_multiply_inputs(x float64, y float64)
+create function
+    mydataset.remote_multiply_inputs(
+        x float64
+        , y float64
+    )
 returns float64
 remote with connection us.myconnection
 options (endpoint = "https://us-central1-myproject.cloudfunctions.net/multiply")
@@ -62,17 +83,30 @@ options (endpoint = "https://us-central1-myproject.cloudfunctions.net/multiply")
 
 create or replace table function mydataset.names_by_year(y int64)
 as
-select year, name, sum(number) as total
+select
+    year
+    , name
+    , sum(number) as total
 from `bigquery-public-data.usa_names.usa_1910_current`
 where year = y
-group by year, name
+group by
+    year
+    , name
 ;
 
 create or replace table function mydataset.names_by_year(y int64)
-returns table<name string, year int64, total int64>
+returns
+    table<name string
+        , year int64
+        , total int64>
 as
-select year, name, sum(number) as total
+select
+    year
+    , name
+    , sum(number) as total
 from `bigquery-public-data.usa_names.usa_1910_current`
 where year = y
-group by year, name
+group by
+    year
+    , name
 ;
