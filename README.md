@@ -9,36 +9,44 @@ An opinionated SQL formatter written in Rust. Ported from [Python sqlfmt](https:
 Prebuilt binaries are available for Linux and macOS from
 [GitHub Releases](https://github.com/datastx/sqlfmt-rust/releases/latest).
 
+> **Note:** Replace `VERSION` below with the release version (e.g. `v0.3.1`).
+> Check the [releases page](https://github.com/datastx/sqlfmt-rust/releases/latest)
+> for the latest version.
+
 **Linux (x86_64):**
 
 ```bash
-curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-x86_64-unknown-linux-musl.tar.gz \
+VERSION=v0.3.1
+curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
   | tar xz
-sudo mv sqlfmt-v0.1.0-x86_64-unknown-linux-musl/sqlfmt /usr/local/bin/
+sudo mv "sqlfmt-${VERSION}-x86_64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 ```
 
 **Linux (aarch64 / ARM64):**
 
 ```bash
-curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-aarch64-unknown-linux-musl.tar.gz \
+VERSION=v0.3.1
+curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-unknown-linux-musl.tar.gz" \
   | tar xz
-sudo mv sqlfmt-v0.1.0-aarch64-unknown-linux-musl/sqlfmt /usr/local/bin/
+sudo mv "sqlfmt-${VERSION}-aarch64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 ```
 
 **macOS (Apple Silicon):**
 
 ```bash
-curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-aarch64-apple-darwin.tar.gz \
+VERSION=v0.3.1
+curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-apple-darwin.tar.gz" \
   | tar xz
-sudo mv sqlfmt-v0.1.0-aarch64-apple-darwin/sqlfmt /usr/local/bin/
+sudo mv "sqlfmt-${VERSION}-aarch64-apple-darwin/sqlfmt" /usr/local/bin/
 ```
 
 **macOS (Intel):**
 
 ```bash
-curl -fsSL https://github.com/datastx/sqlfmt-rust/releases/latest/download/sqlfmt-v0.1.0-x86_64-apple-darwin.tar.gz \
+VERSION=v0.3.1
+curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-apple-darwin.tar.gz" \
   | tar xz
-sudo mv sqlfmt-v0.1.0-x86_64-apple-darwin/sqlfmt /usr/local/bin/
+sudo mv "sqlfmt-${VERSION}-x86_64-apple-darwin/sqlfmt" /usr/local/bin/
 ```
 
 ### Verify the download
@@ -96,21 +104,25 @@ Arguments:
   <FILES>...  Files or directories to format. Use "-" to read from stdin
 
 Options:
-  -l, --line-length <N>       Maximum line length [default: 88]
-  -d, --dialect <DIALECT>     SQL dialect: polyglot, duckdb, clickhouse [default: polyglot]
-      --check                 Check formatting without writing changes
-      --diff                  Show formatting diff
-      --fast                  Skip safety equivalence check (faster)
-      --no-jinjafmt           Disable Jinja template formatting
-      --exclude <PATTERN>     Glob patterns to exclude
-  -t, --threads <N>           Number of threads (0 = all cores) [default: 0]
-      --single-process        Disable multi-threaded processing
-  -v, --verbose               Verbose output
-  -q, --quiet                 Quiet output (errors only)
-      --no-progressbar        Disable progress bar
-      --config <PATH>         Path to config file (pyproject.toml or sqlfmt.toml)
-  -h, --help                  Print help
-  -V, --version               Print version
+  -l, --line-length <LINE_LENGTH>  Maximum line length [default: 88]
+  -d, --dialect <DIALECT>          SQL dialect: polyglot, duckdb, clickhouse [default: polyglot]
+      --check                      Check formatting without writing changes
+      --diff                       Show formatting diff
+      --fast                       Skip safety equivalence check (faster)
+      --no-jinjafmt                Disable Jinja template formatting
+      --exclude <EXCLUDE>          Glob patterns to exclude
+      --encoding <ENCODING>        File encoding [default: utf-8]
+  -v, --verbose                    Verbose output
+  -q, --quiet                      Quiet output (errors only)
+      --no-progressbar             Disable progress bar
+      --force-color                Force color output
+      --no-color                   Disable color output
+  -t, --threads <THREADS>          Number of threads for parallel processing (0 = all cores) [default: 0]
+      --single-process             Disable multi-threaded processing
+  -k, --reset-cache                Reset formatting cache
+      --config <CONFIG>            Path to config file (pyproject.toml or sqlfmt.toml)
+  -h, --help                       Print help
+  -V, --version                    Print version
 ```
 
 ### Environment variables
@@ -140,7 +152,6 @@ sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pypr
 line_length = 100
 dialect = "duckdb"
 exclude = ["migrations/**"]
-threads = 4
 ```
 
 ## Supported platforms
