@@ -165,6 +165,13 @@ exclude = ["migrations/**"]
 
 Linux binaries are statically linked (musl) and have no runtime dependencies.
 
+## Acknowledgments
+
+This project is a Rust port of [sqlfmt](https://github.com/tconbeer/sqlfmt) by
+[Ted Conbeer](https://github.com/tconbeer), originally written in Python and
+licensed under the Apache License 2.0. The SQL test fixture files in `tests/data/`
+are derived from the original project. See the [NOTICE](NOTICE) file for details.
+
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
