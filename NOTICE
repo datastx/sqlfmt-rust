@@ -1,0 +1,24 @@
+sqlfmt-rust
+Copyright 2025-2026 Brian Moore
+
+This project is a derivative work based on sqlfmt (https://github.com/tconbeer/sqlfmt),
+originally created by Ted Conbeer and licensed under the Apache License, Version 2.0.
+
+   sqlfmt - Copyright 2021 Ted Conbeer
+   Licensed under the Apache License, Version 2.0
+   https://github.com/tconbeer/sqlfmt
+
+The following components are derived from the original sqlfmt project:
+
+1. SQL Test Files (tests/data/):
+   The SQL test fixture files in the tests/data/ directory (including files in
+   the preformatted/, unformatted/, and errors/ subdirectories) are derived from
+   the original sqlfmt project and remain under the copyright of Ted Conbeer.
+
+2. Formatting Logic:
+   The core SQL formatting approach, including tokenization patterns and line
+   merging strategies, was originally designed by Ted Conbeer in the Python
+   sqlfmt project and has been ported to Rust with modifications.
+
+This Rust implementation includes changes to the formatting style and behavior
+beyond the original Python sqlfmt project.
