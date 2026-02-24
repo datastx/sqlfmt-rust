@@ -2,6 +2,7 @@ use memchr::memchr2;
 
 /// Skip a string literal starting at position `i` (which must point to `'` or `"`),
 /// copying all characters (including delimiters) into `result`.
+/// Handles backslash escapes and SQL-standard doubled-quote escapes (e.g. `''`).
 /// Returns the position after the closing quote.
 pub(crate) fn skip_string_literal_into(bytes: &[u8], i: usize, result: &mut String) -> usize {
     let quote = bytes[i];
@@ -20,6 +21,13 @@ pub(crate) fn skip_string_literal_into(bytes: &[u8], i: usize, result: &mut Stri
                 j = end + 2;
                 continue;
             }
+            // Check for doubled-quote escape (e.g. '' or "")
+            if bytes[end] == quote && end + 1 < bytes.len() && bytes[end + 1] == quote {
+                result.push(bytes[end] as char);
+                result.push(bytes[end + 1] as char);
+                j = end + 2;
+                continue;
+            }
             // Found the closing quote
             result.push(bytes[end] as char);
             return end + 1;
@@ -33,6 +41,7 @@ pub(crate) fn skip_string_literal_into(bytes: &[u8], i: usize, result: &mut Stri
 }
 
 /// Skip a string literal starting at position `i` (which must point to `'` or `"`).
+/// Handles backslash escapes and SQL-standard doubled-quote escapes (e.g. `''`).
 /// Does not copy any output. Returns the position after the closing quote.
 pub(crate) fn skip_string_literal(bytes: &[u8], i: usize) -> usize {
     let quote = bytes[i];
@@ -41,6 +50,11 @@ pub(crate) fn skip_string_literal(bytes: &[u8], i: usize) -> usize {
         if let Some(offset) = memchr2(quote, b'\\', &bytes[j..]) {
             let end = j + offset;
             if bytes[end] == b'\\' && end + 1 < bytes.len() {
+                j = end + 2;
+                continue;
+            }
+            // Check for doubled-quote escape (e.g. '' or "")
+            if bytes[end] == quote && end + 1 < bytes.len() && bytes[end + 1] == quote {
                 j = end + 2;
                 continue;
             }
@@ -88,5 +102,55 @@ mod tests {
         let pos = skip_string_literal_into(bytes, 0, &mut result);
         assert_eq!(pos, 7);
         assert_eq!(result, "'hello'", "Should copy delimiters and content");
+    }
+
+    #[test]
+    fn test_skip_doubled_quote_escape() {
+        // 'Men''s Basketball' — the '' is an escaped single quote
+        let bytes = b"'Men''s Basketball' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(
+            pos, 19,
+            "Should treat '' as escaped quote, not end of string"
+        );
+    }
+
+    #[test]
+    fn test_skip_doubled_quote_escape_into() {
+        let bytes = b"'Men''s Basketball' rest";
+        let mut result = String::new();
+        let pos = skip_string_literal_into(bytes, 0, &mut result);
+        assert_eq!(pos, 19);
+        assert_eq!(
+            result, "'Men''s Basketball'",
+            "Should copy full string including escaped quotes"
+        );
+    }
+
+    #[test]
+    fn test_skip_multiple_doubled_quotes() {
+        // 'select ''hello'' end' — two escaped quotes
+        let bytes = b"'select ''hello'' end' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(pos, 22, "Should handle multiple doubled-quote escapes");
+    }
+
+    #[test]
+    fn test_skip_trailing_doubled_quote() {
+        // 'hello world.''' — escaped quote at end of string
+        let bytes = b"'hello world.''' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(
+            pos, 16,
+            "Should handle doubled-quote at end of string content"
+        );
+    }
+
+    #[test]
+    fn test_skip_empty_string() {
+        // '' — empty string, not an escaped quote
+        let bytes = b"'' rest";
+        let pos = skip_string_literal(bytes, 0);
+        assert_eq!(pos, 2, "Empty string '' should be treated as empty string");
     }
 }

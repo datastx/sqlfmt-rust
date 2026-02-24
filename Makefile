@@ -4,6 +4,10 @@
 fmt:
 	cargo fmt --all -- --check
 
+fmt-fix:
+	cargo fmt --all
+
+
 ## Run clippy with warnings as errors
 lint:
 	cargo clippy -- -D warnings

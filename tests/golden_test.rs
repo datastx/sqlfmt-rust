@@ -200,6 +200,7 @@ golden_tests! {
     golden_unformatted_134_databricks_type_hints => "tests/data/unformatted/134_databricks_type_hints.sql",
     golden_unformatted_135_star_columns => "tests/data/unformatted/135_star_columns.sql",
     golden_unformatted_136_databricks_variant => "tests/data/unformatted/136_databricks_variant.sql",
+    golden_unformatted_137_escaped_single_quotes => "tests/data/unformatted/137_escaped_single_quotes.sql",
 }
 
 // =============================================================================
