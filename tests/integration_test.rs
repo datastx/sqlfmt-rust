@@ -1055,3 +1055,34 @@ fn test_format_dbt_deeply_nested() {
         "dbt_deeply_nested.sql formatting should be idempotent"
     );
 }
+
+#[test]
+fn test_format_idempotent_no_trailing_newline_growth() {
+    let source = "SELECT 1\n";
+    let mode = default_mode();
+    let first = format_string(source, &mode).unwrap();
+    let second = format_string(&first, &mode).unwrap();
+    assert_eq!(
+        first, second,
+        "Formatting twice should produce identical output"
+    );
+
+    // Also verify a third pass stays stable
+    let third = format_string(&second, &mode).unwrap();
+    assert_eq!(
+        second, third,
+        "Formatting three times should produce identical output"
+    );
+}
+
+#[test]
+fn test_format_normalizes_trailing_newlines() {
+    let mode = default_mode();
+    // Input with multiple trailing newlines
+    let result = format_string("SELECT 1\n\n\n", &mode).unwrap();
+    assert!(result.ends_with('\n'), "Output should end with a newline");
+    assert!(
+        !result.ends_with("\n\n"),
+        "Output should not end with multiple newlines"
+    );
+}

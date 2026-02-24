@@ -1,6 +1,6 @@
 [package]
 name = "sqlfmt"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "An opinionated SQL formatter, ported from Python sqlfmt. Optimized for Snowflake and DuckDB."
 license = "Apache-2.0"

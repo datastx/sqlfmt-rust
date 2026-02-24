@@ -47,6 +47,14 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
     formatter.format(&mut query, &mut arena);
 
     let result = query.render(&arena);
+    // Normalize trailing newlines to exactly one, ensuring idempotency.
+    // Preserve truly empty output (empty files) as-is.
+    let trimmed = result.trim_end_matches('\n');
+    let result = if trimmed.is_empty() {
+        result
+    } else {
+        format!("{}\n", trimmed)
+    };
 
     if let Some(ref orig_tokens) = original_tokens {
         safety_check(orig_tokens, &result, mode)?;
