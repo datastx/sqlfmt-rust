@@ -338,7 +338,8 @@ fn scan_number(bytes: &[u8]) -> usize {
     i
 }
 
-/// Scan a string literal (single or double quoted). Handles backslash escapes.
+/// Scan a string literal (single or double quoted). Handles backslash escapes
+/// and SQL-standard doubled-quote escapes (e.g. `''` inside a single-quoted string).
 /// Returns the byte length including delimiters.
 fn scan_string(bytes: &[u8]) -> usize {
     let quote = bytes[0];
@@ -347,6 +348,11 @@ fn scan_string(bytes: &[u8]) -> usize {
         if let Some(offset) = memchr2(quote, b'\\', &bytes[i..]) {
             let pos = i + offset;
             if bytes[pos] == b'\\' && pos + 1 < bytes.len() {
+                i = pos + 2;
+                continue;
+            }
+            // Check for doubled-quote escape (e.g. '' or "")
+            if bytes[pos] == quote && pos + 1 < bytes.len() && bytes[pos + 1] == quote {
                 i = pos + 2;
                 continue;
             }
