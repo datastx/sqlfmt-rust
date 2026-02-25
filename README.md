@@ -59,12 +59,30 @@ sha256sum -c checksums-sha256.txt
 
 ### Build from source
 
-Requires [Rust](https://rustup.rs/) 1.70+.
+Requires [Rust](https://rustup.rs/) 1.80+.
 
 ```bash
 git clone https://github.com/datastx/sqlfmt-rust.git
 cd sqlfmt-rust
 cargo install --path .
+```
+
+### Use as a library
+
+Add `sqlfmt` to your project:
+
+```bash
+cargo add sqlfmt
+```
+
+Then format SQL strings in your Rust code:
+
+```rust
+use sqlfmt::{format_string, Mode};
+
+let mode = Mode::default();
+let formatted = format_string("SELECT   a,b FROM t WHERE x=1\n", &mode).unwrap();
+println!("{}", formatted);
 ```
 
 ## Usage

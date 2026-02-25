@@ -1,3 +1,26 @@
+//! # sqlfmt
+//!
+//! An opinionated SQL formatter optimized for Snowflake and DuckDB.
+//! Ported from [Python sqlfmt](https://github.com/tconbeer/sqlfmt).
+//!
+//! ## Quick Start
+//!
+//! ```
+//! use sqlfmt::{format_string, Mode};
+//!
+//! let mode = Mode::default();
+//! let result = format_string("SELECT   a,b FROM t WHERE x=1\n", &mode).unwrap();
+//! assert!(result.contains("select"));
+//! ```
+//!
+//! ## Library API
+//!
+//! The primary entry point for library users is [`format_string`], which formats
+//! a SQL string in memory. For batch file processing, use [`run`].
+//!
+//! Configuration is controlled by the [`Mode`] struct, which supports all
+//! formatting options (line length, dialect, safety checks, etc.).
+
 pub(crate) mod action;
 pub(crate) mod analyzer;
 pub mod api;

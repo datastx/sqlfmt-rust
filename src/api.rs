@@ -17,7 +17,24 @@ struct TokenSnapshot {
 }
 
 /// Format a SQL string according to the given mode.
-/// This is the core API function.
+///
+/// This is the primary entry point for library users. It takes a SQL source
+/// string and returns the formatted output.
+///
+/// # Examples
+///
+/// ```
+/// use sqlfmt::{format_string, Mode};
+///
+/// let mode = Mode::default();
+/// let formatted = format_string("SELECT   1\n", &mode).unwrap();
+/// assert_eq!(formatted, "select 1\n");
+/// ```
+///
+/// # Errors
+///
+/// Returns [`SqlfmtError`] if the input contains syntax errors (e.g.,
+/// unmatched brackets or unterminated comments).
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
     let dialect = mode.dialect()?;
 

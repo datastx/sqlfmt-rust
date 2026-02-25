@@ -2,8 +2,16 @@
 name = "sqlfmt"
 version = "0.3.2"
 edition = "2021"
+rust-version = "1.80"
 description = "An opinionated SQL formatter, ported from Python sqlfmt. Optimized for Snowflake and DuckDB."
 license = "Apache-2.0"
+repository = "https://github.com/datastx/sqlfmt-rust"
+homepage = "https://github.com/datastx/sqlfmt-rust"
+documentation = "https://docs.rs/sqlfmt"
+readme = "README.md"
+keywords = ["sql", "formatter", "snowflake", "duckdb", "jinja"]
+categories = ["command-line-utilities", "development-tools", "text-processing"]
+exclude = ["tests/", "benches/", "examples/", ".github/"]
 
 [[bin]]
 name = "sqlfmt"
