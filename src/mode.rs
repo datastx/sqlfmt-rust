@@ -30,23 +30,11 @@ pub struct Mode {
     #[serde(default)]
     pub exclude: Vec<String>,
 
-    #[serde(default = "default_encoding")]
-    pub encoding: String,
-
     #[serde(default)]
     pub verbose: bool,
 
     #[serde(default)]
     pub quiet: bool,
-
-    #[serde(default)]
-    pub no_progressbar: bool,
-
-    #[serde(default)]
-    pub no_color: bool,
-
-    #[serde(default)]
-    pub force_color: bool,
 
     /// Number of threads for parallel processing (0 = all cores).
     #[serde(default)]
@@ -54,9 +42,6 @@ pub struct Mode {
 
     #[serde(default)]
     pub single_process: bool,
-
-    #[serde(default)]
-    pub reset_cache: bool,
 }
 
 fn default_line_length() -> usize {
@@ -65,29 +50,10 @@ fn default_line_length() -> usize {
 fn default_dialect() -> String {
     "polyglot".to_string()
 }
-fn default_encoding() -> String {
-    "utf-8".to_string()
-}
-
 impl Mode {
     /// Create the dialect for the configured dialect_name.
     pub fn dialect(&self) -> Result<Box<dyn Dialect>, SqlfmtError> {
         dialect::dialect_from_name(&self.dialect_name)
-    }
-
-    /// Whether color output is enabled.
-    #[cfg(test)]
-    pub fn color(&self) -> bool {
-        if self.force_color {
-            return true;
-        }
-        if self.no_color {
-            return false;
-        }
-        if std::env::var("NO_COLOR").is_ok() {
-            return false;
-        }
-        true
     }
 
     /// Whether safety check should be performed.
@@ -111,15 +77,10 @@ impl Default for Mode {
             fast: false,
             no_jinjafmt: false,
             exclude: Vec::new(),
-            encoding: "utf-8".to_string(),
             verbose: false,
             quiet: false,
-            no_progressbar: false,
-            no_color: false,
-            force_color: false,
             threads: 0,
             single_process: false,
-            reset_cache: false,
         }
     }
 }

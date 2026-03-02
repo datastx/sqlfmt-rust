@@ -81,7 +81,8 @@ fn test_segment_head_skips_blank() {
 
     let seg = Segment::new(vec![blank_line, content_line]);
     let (head_idx, _) = seg.head(&arena).unwrap();
-    assert_eq!(head_idx, 1); // Skipped the blank line
+    // Skipped the blank line
+    assert_eq!(head_idx, 1);
 }
 
 #[test]

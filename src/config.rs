@@ -129,13 +129,7 @@ fn apply_config(mode: &mut Mode, config: &HashMap<String, toml::Value>) -> Resul
         mode.no_jinjafmt = *b;
     }
 
-    let known_keys = [
-        "line_length",
-        "dialect",
-        "exclude",
-        "no_jinjafmt",
-        "encoding",
-    ];
+    let known_keys = ["line_length", "dialect", "exclude", "no_jinjafmt"];
     for key in config.keys() {
         if !known_keys.contains(&key.as_str()) {
             return Err(SqlfmtError::Config(format!(

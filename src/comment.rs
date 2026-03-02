@@ -94,11 +94,13 @@ impl Comment {
             return format!("{}{}\n", prefix, marker);
         }
 
-        let overhead = prefix.len() + marker.len() + 1; // +1 for space after marker
+        // +1 for space after marker
+        let overhead = prefix.len() + marker.len() + 1;
         let max_text_width = if max_line_length > overhead {
             max_line_length - overhead
         } else {
-            40 // fallback
+            // fallback
+            40
         };
 
         if body.len() <= max_text_width {

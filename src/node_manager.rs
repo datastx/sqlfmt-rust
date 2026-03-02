@@ -419,7 +419,8 @@ impl NodeManager {
                 let node = &arena[idx];
                 if node.token.token_type.does_not_set_prev_sql_context() {
                     let (prev, _) = Self::get_previous_token(node.previous_node, arena);
-                    (prev, true) // extra_whitespace = true because we skipped
+                    // extra_whitespace = true because we skipped
+                    (prev, true)
                 } else {
                     (Some(node), false)
                 }

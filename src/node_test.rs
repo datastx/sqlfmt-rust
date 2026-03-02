@@ -27,14 +27,6 @@ fn test_depth_with_brackets() {
 }
 
 #[test]
-fn test_formatted_string() {
-    let mut node = make_node(TokenType::Name, "foo", None);
-    node.prefix = CompactString::from(" ");
-    assert_eq!(node.to_formatted_string(), " foo");
-    assert_eq!(node.len(), 4);
-}
-
-#[test]
 fn test_is_multiplication_star() {
     // Star after a name => multiplication
     let mut arena = Vec::new();
@@ -151,12 +143,6 @@ fn test_node_classification_methods() {
     assert!(make_node(TokenType::BracketOpen, "(", None).is_opening_bracket());
     assert!(make_node(TokenType::BracketClose, ")", None).is_closing_bracket());
     assert!(make_node(TokenType::Newline, "\n", None).is_newline());
-    assert!(make_node(TokenType::Semicolon, ";", None).is_semicolon());
-    assert!(make_node(TokenType::SetOperator, "union", None).is_set_operator());
-    assert!(make_node(TokenType::Star, "*", None).is_star());
-    assert!(make_node(TokenType::Name, "foo", None).is_name());
-    assert!(make_node(TokenType::QuotedName, "\"bar\"", None).is_quoted_name());
-    assert!(make_node(TokenType::Dot, ".", None).is_dot());
     assert!(make_node(TokenType::BooleanOperator, "and", None).is_boolean_operator());
 }
 

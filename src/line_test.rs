@@ -108,42 +108,6 @@ fn test_starts_with_operator() {
 }
 
 #[test]
-fn test_starts_with_boolean_operator() {
-    let mut arena = Vec::new();
-    let idx = make_node_in_arena(&mut arena, TokenType::BooleanOperator, "and", "");
-    let mut line = Line::new(None);
-    line.append_node(idx);
-    assert!(line.starts_with_boolean_operator(&arena));
-}
-
-#[test]
-fn test_starts_with_set_operator() {
-    let mut arena = Vec::new();
-    let idx = make_node_in_arena(&mut arena, TokenType::SetOperator, "union all", "");
-    let mut line = Line::new(None);
-    line.append_node(idx);
-    assert!(line.starts_with_set_operator(&arena));
-}
-
-#[test]
-fn test_starts_with_semicolon() {
-    let mut arena = Vec::new();
-    let idx = make_node_in_arena(&mut arena, TokenType::Semicolon, ";", "");
-    let mut line = Line::new(None);
-    line.append_node(idx);
-    assert!(line.starts_with_semicolon(&arena));
-}
-
-#[test]
-fn test_starts_with_opening_bracket() {
-    let mut arena = Vec::new();
-    let idx = make_node_in_arena(&mut arena, TokenType::BracketOpen, "(", "");
-    let mut line = Line::new(None);
-    line.append_node(idx);
-    assert!(line.starts_with_opening_bracket(&arena));
-}
-
-#[test]
 fn test_closes_bracket_from_previous_line() {
     let mut arena = Vec::new();
     let idx = make_node_in_arena(&mut arena, TokenType::BracketClose, ")", "");
@@ -163,35 +127,6 @@ fn test_ends_with_comma() {
     line.append_node(comma_idx);
     line.append_node(nl_idx);
     assert!(line.ends_with_comma(&arena));
-}
-
-#[test]
-fn test_ends_with_opening_bracket() {
-    let mut arena = Vec::new();
-    let name_idx = make_node_in_arena(&mut arena, TokenType::Name, "count", "");
-    let bracket_idx = make_node_in_arena(&mut arena, TokenType::BracketOpen, "(", "");
-    let nl_idx = make_node_in_arena(&mut arena, TokenType::Newline, "\n", "");
-    let mut line = Line::new(None);
-    line.append_node(name_idx);
-    line.append_node(bracket_idx);
-    line.append_node(nl_idx);
-    assert!(line.ends_with_opening_bracket(&arena));
-}
-
-#[test]
-fn test_contains_jinja() {
-    let mut arena = Vec::new();
-    let jinja_idx = make_node_in_arena(&mut arena, TokenType::JinjaExpression, "{{ x }}", "");
-    let mut line = Line::new(None);
-    line.append_node(jinja_idx);
-    assert!(line.contains_jinja(&arena));
-
-    // Line without jinja
-    let mut arena2 = Vec::new();
-    let name_idx = make_node_in_arena(&mut arena2, TokenType::Name, "x", "");
-    let mut line2 = Line::new(None);
-    line2.append_node(name_idx);
-    assert!(!line2.contains_jinja(&arena2));
 }
 
 #[test]
@@ -218,10 +153,12 @@ fn test_render_blank_line() {
 fn test_indentation_with_depth() {
     let mut arena = Vec::new();
     let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-    arena[idx].bracket_depth = 1; // depth 1
+    // depth 1
+    arena[idx].bracket_depth = 1;
     let mut line = Line::new(None);
     line.append_node(idx);
-    assert_eq!(line.indentation(&arena), "    "); // 4 spaces per depth level
+    // 4 spaces per depth level
+    assert_eq!(line.indentation(&arena), "    ");
 }
 
 #[test]
@@ -230,18 +167,6 @@ fn test_has_formatting_disabled() {
     assert!(!line.has_formatting_disabled());
     line.formatting_disabled = true;
     assert!(line.has_formatting_disabled());
-}
-
-#[test]
-fn test_is_empty_line() {
-    let line = Line::new(None);
-    assert!(line.is_empty());
-
-    let mut arena = Vec::new();
-    let idx = make_node_in_arena(&mut arena, TokenType::Name, "a", "");
-    let mut line2 = Line::new(None);
-    line2.append_node(idx);
-    assert!(!line2.is_empty());
 }
 
 #[test]

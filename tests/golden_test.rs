@@ -1,6 +1,6 @@
 mod common;
 
-use common::{clickhouse_mode, default_mode, run_golden_error_test, run_golden_test};
+use common::{default_mode, run_golden_error_test, run_golden_test};
 
 /// Unified macro for golden tests with per-entry mode.
 macro_rules! golden_tests {
@@ -114,11 +114,6 @@ golden_tests! {
     golden_unformatted_221_dbt_config_dollar_quoted => (default_mode, "tests/data/unformatted/221_dbt_config_dollar_quoted.sql"),
     golden_unformatted_222_colorado_claims_extract => (default_mode, "tests/data/unformatted/222_colorado_claims_extract.sql"),
     golden_unformatted_222_jinja_unbalanced_brackets => (default_mode, "tests/data/unformatted/222_jinja_unbalanced_brackets.sql"),
-
-    // =========================================================================
-    // ClickHouse dialect
-    // =========================================================================
-    golden_unformatted_220_clickhouse_joins => (clickhouse_mode, "tests/data/unformatted/220_clickhouse_joins.sql"),
 
     // =========================================================================
     // Unformatted 300-series — Jinja formatting

@@ -277,8 +277,10 @@ impl JinjaFormatter {
             }
 
             let is_operator = match bytes[i] {
-                b'+' => i + 1 >= bytes.len() || bytes[i + 1] != b'=', // + but not +=
-                b'|' => i + 1 >= bytes.len() || bytes[i + 1] != b'|', // | but not ||
+                // + but not +=
+                b'+' => i + 1 >= bytes.len() || bytes[i + 1] != b'=',
+                // | but not ||
+                b'|' => i + 1 >= bytes.len() || bytes[i + 1] != b'|',
                 b'~' => true,
                 // = at depth 0 is assignment (gets spaces), at depth > 0 is kwarg (no spaces)
                 b'=' => paren_depth == 0 && (i + 1 >= bytes.len() || bytes[i + 1] != b'='),

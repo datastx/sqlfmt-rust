@@ -38,7 +38,6 @@ pub(crate) struct Line {
     pub(crate) formatting_disabled: bool,
 }
 
-#[allow(dead_code)] // Many methods are used only by tests
 impl Line {
     pub(crate) fn new(previous_node: Option<NodeIndex>) -> Self {
         Self {
@@ -220,27 +219,10 @@ impl Line {
                 length += node.value.len();
                 first_content = false;
             } else {
-                length += node.len(); // prefix.len() + value.len()
+                length += node.len();
             }
         }
         length
-    }
-
-    /// Length including inline comments (for merger length checks).
-    pub(crate) fn len_with_comments(&self, arena: &[Node]) -> usize {
-        let base = self.len(arena);
-        let inline_len: usize = self
-            .comments
-            .iter()
-            .filter(|c| c.is_inline())
-            .map(|c| c.render_inline().len())
-            .sum();
-        base + inline_len
-    }
-
-    /// True if the line has no nodes.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
     }
 
     /// Get the first non-newline node.
@@ -286,63 +268,15 @@ impl Line {
             .unwrap_or(false)
     }
 
-    pub(crate) fn starts_with_unterm_keyword(&self, arena: &[Node]) -> bool {
-        self.first_content_node(arena)
-            .map(|n| n.is_unterm_keyword())
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn starts_with_boolean_operator(&self, arena: &[Node]) -> bool {
-        self.first_content_node(arena)
-            .map(|n| n.is_boolean_operator())
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn starts_with_set_operator(&self, arena: &[Node]) -> bool {
-        self.first_content_node(arena)
-            .map(|n| n.is_set_operator())
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn starts_with_semicolon(&self, arena: &[Node]) -> bool {
-        self.first_content_node(arena)
-            .map(|n| n.is_semicolon())
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn starts_with_opening_bracket(&self, arena: &[Node]) -> bool {
-        self.first_content_node(arena)
-            .map(|n| n.is_opening_bracket())
-            .unwrap_or(false)
-    }
-
     pub(crate) fn closes_bracket_from_previous_line(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_closing_bracket())
             .unwrap_or(false)
     }
 
-    pub(crate) fn contains_operator(&self, arena: &[Node]) -> bool {
-        self.nodes.iter().any(|&i| arena[i].is_operator(arena))
-    }
-
-    pub(crate) fn contains_jinja(&self, arena: &[Node]) -> bool {
-        self.nodes.iter().any(|&i| arena[i].is_jinja())
-    }
-
-    pub(crate) fn contains_multiline_jinja(&self, arena: &[Node]) -> bool {
-        self.nodes.iter().any(|&i| arena[i].is_multiline_jinja())
-    }
-
     pub(crate) fn ends_with_comma(&self, arena: &[Node]) -> bool {
         self.last_content_node(arena)
             .map(|n| n.is_comma())
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn ends_with_opening_bracket(&self, arena: &[Node]) -> bool {
-        self.last_content_node(arena)
-            .map(|n| n.is_opening_bracket())
             .unwrap_or(false)
     }
 
@@ -432,17 +366,6 @@ impl Line {
             return true;
         }
         false
-    }
-
-    /// True if this line marks the start of a new segment (simple version).
-    pub(crate) fn starts_new_segment(&self, arena: &[Node]) -> bool {
-        if self.is_blank_line(arena) {
-            return self.depth(arena) == (0, 0);
-        }
-        self.closes_bracket_from_previous_line(arena)
-            || self.starts_with_unterm_keyword(arena)
-            || self.starts_with_set_operator(arena)
-            || self.starts_with_semicolon(arena)
     }
 
     /// True if formatting is disabled for this line.

@@ -347,18 +347,6 @@ fn test_dialect_duckdb() {
 }
 
 #[test]
-fn test_dialect_clickhouse() {
-    sqlfmt()
-        .arg("-")
-        .arg("--dialect")
-        .arg("clickhouse")
-        .write_stdin("SELECT 1\n")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("select"));
-}
-
-#[test]
 fn test_invalid_dialect() {
     sqlfmt()
         .arg("-")
@@ -385,16 +373,6 @@ fn test_no_jinjafmt_flag() {
 fn test_fast_flag_skips_safety_check() {
     let dir = setup_temp_dir(&[("query.sql", "SELECT    1\n")]);
     sqlfmt().arg("--fast").arg(dir.path()).assert().success();
-}
-
-#[test]
-fn test_no_color_flag() {
-    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
-    sqlfmt()
-        .arg("--no-color")
-        .arg(dir.path())
-        .assert()
-        .success();
 }
 
 #[test]
@@ -473,7 +451,8 @@ fn test_idempotent_formatting_via_cli() {
     let first_pass = fs::read_to_string(&file_path).unwrap();
 
     // Second format (should be unchanged)
-    sqlfmt().arg("--check").arg(&file_path).assert().success(); // exit 0 means no changes needed
+    // exit 0 means no changes needed
+    sqlfmt().arg("--check").arg(&file_path).assert().success();
 
     let second_pass = fs::read_to_string(&file_path).unwrap();
     assert_eq!(first_pass, second_pass, "Formatting should be idempotent");

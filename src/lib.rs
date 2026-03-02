@@ -21,9 +21,6 @@ pub(crate) mod splitter;
 pub(crate) mod string_utils;
 pub(crate) mod token;
 
-#[cfg(test)]
-pub(crate) mod test_helpers;
-
 // Re-export the main public API
 pub use api::{format_string, get_matching_paths, run};
 pub use config::load_config;

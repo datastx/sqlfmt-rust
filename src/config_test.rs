@@ -123,16 +123,3 @@ fn test_apply_config_no_jinjafmt() {
     apply_config(&mut mode, &config).unwrap();
     assert!(mode.no_jinjafmt);
 }
-
-#[test]
-fn test_apply_config_dialect_clickhouse() {
-    let mut mode = Mode::default();
-    let mut config = HashMap::new();
-    config.insert(
-        "dialect".to_string(),
-        toml::Value::String("clickhouse".to_string()),
-    );
-
-    apply_config(&mut mode, &config).unwrap();
-    assert_eq!(mode.dialect_name, "clickhouse");
-}

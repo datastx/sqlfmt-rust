@@ -12,14 +12,6 @@ pub fn default_mode() -> Mode {
     Mode::default()
 }
 
-/// ClickHouse dialect mode.
-pub fn clickhouse_mode() -> Mode {
-    Mode {
-        dialect_name: "clickhouse".to_string(),
-        ..Mode::default()
-    }
-}
-
 /// DuckDB dialect mode.
 pub fn duckdb_mode() -> Mode {
     Mode {

@@ -6,7 +6,8 @@ use crate::token::TokenType;
 fn test_skip_prefix_whitespace() {
     assert_eq!(skip_prefix_whitespace(b"  hello"), 2);
     assert_eq!(skip_prefix_whitespace(b"\thello"), 1);
-    assert_eq!(skip_prefix_whitespace(b"\nhello"), 0); // newline is NOT whitespace prefix
+    // newline is NOT whitespace prefix
+    assert_eq!(skip_prefix_whitespace(b"\nhello"), 0);
     assert_eq!(skip_prefix_whitespace(b"hello"), 0);
 }
 
@@ -15,7 +16,8 @@ fn test_scan_word() {
     assert_eq!(scan_word(b"select"), 6);
     assert_eq!(scan_word(b"my_table"), 8);
     assert_eq!(scan_word(b"foo123 bar"), 6);
-    assert_eq!(scan_word(b"123abc"), 6); // numbers are word chars
+    // numbers are word chars
+    assert_eq!(scan_word(b"123abc"), 6);
 }
 
 #[test]
