@@ -605,3 +605,216 @@ fn test_exit_code_2_on_error() {
     let dir = setup_temp_dir(&[("bad.sql", "select */\n")]);
     sqlfmt().arg(dir.path()).assert().code(2);
 }
+
+// ─── Config file support ───
+
+#[test]
+fn test_config_sqlfmt_toml_line_length() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    fs::write(dir.path().join("sqlfmt.toml"), "line_length = 120\n").unwrap();
+    sqlfmt()
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 file(s) processed"));
+}
+
+#[test]
+fn test_config_pyproject_toml() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    fs::write(
+        dir.path().join("pyproject.toml"),
+        "[tool.sqlfmt]\nline_length = 100\n",
+    )
+    .unwrap();
+    sqlfmt()
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 file(s) processed"));
+}
+
+#[test]
+fn test_config_explicit_path() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    let config_path = dir.path().join("custom.toml");
+    fs::write(&config_path, "line_length = 100\n").unwrap();
+    sqlfmt()
+        .arg("--config")
+        .arg(&config_path)
+        .arg(dir.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_config_missing_file_exits_2() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    sqlfmt()
+        .arg("--config")
+        .arg("/nonexistent/sqlfmt.toml")
+        .arg(dir.path())
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("Configuration error"));
+}
+
+#[test]
+fn test_config_exclude_from_file() {
+    let dir = setup_temp_dir(&[("keep.sql", "SELECT    1\n"), ("skip.sql", "SELECT    2\n")]);
+    fs::write(dir.path().join("sqlfmt.toml"), "exclude = [\"skip*\"]\n").unwrap();
+    sqlfmt().arg(dir.path()).assert().success();
+
+    // keep.sql should be reformatted
+    let kept = fs::read_to_string(dir.path().join("keep.sql")).unwrap();
+    assert!(kept.contains("select"), "keep.sql should be reformatted");
+
+    // skip.sql should remain unchanged
+    let skipped = fs::read_to_string(dir.path().join("skip.sql")).unwrap();
+    assert_eq!(skipped, "SELECT    2\n", "skip.sql should be excluded");
+}
+
+#[test]
+fn test_config_auto_discovery() {
+    let dir = setup_temp_dir(&[("subdir/query.sql", "select 1\n")]);
+    fs::write(dir.path().join("sqlfmt.toml"), "line_length = 120\n").unwrap();
+    // Pass the subdir; config should be discovered from parent
+    sqlfmt()
+        .arg(dir.path().join("subdir"))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 file(s) processed"));
+}
+
+// ─── Environment variables ───
+
+#[test]
+fn test_env_sqlfmt_fast() {
+    let dir = setup_temp_dir(&[("query.sql", "SELECT    1\n")]);
+    sqlfmt()
+        .env("SQLFMT_FAST", "1")
+        .arg(dir.path())
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(dir.path().join("query.sql")).unwrap();
+    assert_eq!(content.trim(), "select 1");
+}
+
+#[test]
+fn test_env_sqlfmt_threads() {
+    let dir = setup_temp_dir(&[("a.sql", "SELECT    1\n"), ("b.sql", "SELECT    2\n")]);
+    sqlfmt()
+        .env("SQLFMT_THREADS", "2")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("2 file(s) processed"));
+}
+
+// ─── Short flags ───
+
+#[test]
+fn test_dialect_short_flag() {
+    sqlfmt()
+        .arg("-")
+        .arg("-d")
+        .arg("polyglot")
+        .write_stdin("SELECT 1\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("select"));
+}
+
+#[test]
+fn test_verbose_short_flag() {
+    let dir = setup_temp_dir(&[("query.sql", "select 1\n")]);
+    sqlfmt()
+        .arg("-v")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s) processed"));
+}
+
+#[test]
+fn test_quiet_short_flag() {
+    let dir = setup_temp_dir(&[("query.sql", "SELECT    1\n")]);
+    sqlfmt()
+        .arg("-q")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+}
+
+// ─── Multiple exclude patterns ───
+
+#[test]
+fn test_multiple_exclude_patterns() {
+    let dir = setup_temp_dir(&[
+        ("keep.sql", "SELECT    1\n"),
+        ("skip_a.sql", "SELECT    2\n"),
+        ("skip_b.sql", "SELECT    3\n"),
+    ]);
+    sqlfmt()
+        .arg("--exclude")
+        .arg("skip_a*")
+        .arg("--exclude")
+        .arg("skip_b*")
+        .arg(dir.path())
+        .assert()
+        .success();
+
+    let kept = fs::read_to_string(dir.path().join("keep.sql")).unwrap();
+    assert!(kept.contains("select"), "keep.sql should be reformatted");
+
+    let skip_a = fs::read_to_string(dir.path().join("skip_a.sql")).unwrap();
+    assert_eq!(skip_a, "SELECT    2\n", "skip_a.sql should be excluded");
+
+    let skip_b = fs::read_to_string(dir.path().join("skip_b.sql")).unwrap();
+    assert_eq!(skip_b, "SELECT    3\n", "skip_b.sql should be excluded");
+}
+
+#[test]
+fn test_exclude_subdirectory_pattern() {
+    // Exclude matching works on the entry name (file or directory name),
+    // so excluding a directory name skips the entire subtree.
+    let dir = setup_temp_dir(&[
+        ("top.sql", "SELECT    1\n"),
+        ("migrations/001.sql", "SELECT    2\n"),
+    ]);
+    sqlfmt()
+        .arg("--exclude")
+        .arg("migrations")
+        .arg(dir.path())
+        .assert()
+        .success();
+
+    let top = fs::read_to_string(dir.path().join("top.sql")).unwrap();
+    assert!(top.contains("select"), "top.sql should be reformatted");
+
+    let migrated = fs::read_to_string(dir.path().join("migrations/001.sql")).unwrap();
+    assert_eq!(
+        migrated, "SELECT    2\n",
+        "migrations/001.sql should be excluded"
+    );
+}
+
+// ─── Diff output ───
+
+#[test]
+fn test_diff_output_contains_markers() {
+    let dir = setup_temp_dir(&[("query.sql", "SELECT    1\n")]);
+    sqlfmt()
+        .arg("--diff")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("---")
+                .and(predicate::str::contains("+++"))
+                .and(predicate::str::contains("-SELECT"))
+                .and(predicate::str::contains("+select")),
+        );
+}
