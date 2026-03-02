@@ -5,19 +5,13 @@ use crate::node::Node;
 /// and the lines produced by the lexer/formatter.
 #[derive(Debug, Clone)]
 pub struct Query {
-    #[allow(dead_code)]
-    pub(crate) source_string: String,
     pub(crate) line_length: usize,
     pub(crate) lines: Vec<Line>,
 }
 
 impl Query {
-    pub(crate) fn new(source_string: String, line_length: usize, lines: Vec<Line>) -> Self {
-        Self {
-            source_string,
-            line_length,
-            lines,
-        }
+    pub(crate) fn new(line_length: usize, lines: Vec<Line>) -> Self {
+        Self { line_length, lines }
     }
 
     /// Render the full formatted output.
@@ -71,37 +65,5 @@ impl Query {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_empty_query() {
-        let q = Query::new("".to_string(), 88, Vec::new());
-        let arena: Vec<Node> = Vec::new();
-        assert_eq!(q.render(&arena), "");
-    }
-
-    #[test]
-    fn test_comment_only_query() {
-        // Use the full pipeline to verify comment-only input
-        let mode = crate::mode::Mode::default();
-        let result = crate::api::format_string("-- comment\n", &mode).unwrap();
-        assert!(
-            result.contains("-- comment"),
-            "Comment should be preserved: {}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_whitespace_only_query() {
-        let mode = crate::mode::Mode::default();
-        let result = crate::api::format_string("\n\n\n", &mode).unwrap();
-        // Whitespace-only should produce empty or minimal output
-        assert!(
-            result.trim().is_empty(),
-            "Whitespace-only should produce empty output: {:?}",
-            result
-        );
-    }
-}
+#[path = "query_test.rs"]
+mod tests;
