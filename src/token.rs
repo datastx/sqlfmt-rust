@@ -2,12 +2,12 @@ use compact_str::CompactString;
 
 /// Position in source string (byte offset). u32 is sufficient (SQL files < 4GB)
 /// and saves 8 bytes per Token vs usize on 64-bit platforms.
-pub type Pos = u32;
+pub(crate) type Pos = u32;
 
 /// All token types recognized by the lexer.
 /// Mirrors Python sqlfmt's TokenType (31 variants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TokenType {
+pub(crate) enum TokenType {
     FmtOff,
     FmtOn,
     Data,
@@ -18,7 +18,9 @@ pub enum TokenType {
     JinjaBlockKeyword,
     QuotedName,
     Comment,
+    #[allow(dead_code)]
     CommentStart,
+    #[allow(dead_code)]
     CommentEnd,
     Semicolon,
     StatementStart,
@@ -42,11 +44,12 @@ pub enum TokenType {
 }
 
 impl TokenType {
-    pub fn is_jinja_statement(self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn is_jinja_statement(self) -> bool {
         matches!(self, Self::JinjaStatement | Self::JinjaExpression)
     }
 
-    pub fn is_jinja(self) -> bool {
+    pub(crate) fn is_jinja(self) -> bool {
         matches!(
             self,
             Self::JinjaStatement
@@ -57,19 +60,19 @@ impl TokenType {
         )
     }
 
-    pub fn divides_queries(self) -> bool {
+    pub(crate) fn divides_queries(self) -> bool {
         matches!(self, Self::Semicolon | Self::SetOperator)
     }
 
-    pub fn is_opening_bracket(self) -> bool {
+    pub(crate) fn is_opening_bracket(self) -> bool {
         matches!(self, Self::BracketOpen | Self::StatementStart)
     }
 
-    pub fn is_closing_bracket(self) -> bool {
+    pub(crate) fn is_closing_bracket(self) -> bool {
         matches!(self, Self::BracketClose | Self::StatementEnd)
     }
 
-    pub fn is_always_operator(self) -> bool {
+    pub(crate) fn is_always_operator(self) -> bool {
         matches!(
             self,
             Self::Operator | Self::WordOperator | Self::On | Self::DoubleColon | Self::Colon
@@ -77,7 +80,7 @@ impl TokenType {
     }
 
     /// Tokens that should be lowercased in the formatted output.
-    pub fn is_always_lowercased(self) -> bool {
+    pub(crate) fn is_always_lowercased(self) -> bool {
         matches!(
             self,
             Self::UntermKeyword
@@ -91,7 +94,7 @@ impl TokenType {
     }
 
     /// Tokens that never have a space before them.
-    pub fn is_never_preceded_by_space(self) -> bool {
+    pub(crate) fn is_never_preceded_by_space(self) -> bool {
         matches!(
             self,
             Self::Comma
@@ -106,7 +109,7 @@ impl TokenType {
     }
 
     /// Tokens preceded by a space unless after an opening bracket.
-    pub fn is_preceded_by_space_except_after_open_bracket(self) -> bool {
+    pub(crate) fn is_preceded_by_space_except_after_open_bracket(self) -> bool {
         matches!(
             self,
             Self::Operator
@@ -125,14 +128,14 @@ impl TokenType {
         )
     }
 
-    pub fn is_possible_name(self) -> bool {
+    pub(crate) fn is_possible_name(self) -> bool {
         matches!(self, Self::Name | Self::QuotedName | Self::Star)
     }
 
     /// Tokens that do not affect the "previous SQL context" for whitespace decisions.
     /// Matches Python's `does_not_set_prev_sql_context` which includes all jinja
     /// statement types (block start/keyword/end) plus newlines.
-    pub fn does_not_set_prev_sql_context(self) -> bool {
+    pub(crate) fn does_not_set_prev_sql_context(self) -> bool {
         matches!(
             self,
             Self::Newline
@@ -146,16 +149,22 @@ impl TokenType {
 
 /// An immutable token produced by the lexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Token {
-    pub token_type: TokenType,
-    pub prefix: CompactString,
-    pub text: CompactString,
-    pub spos: Pos,
-    pub epos: Pos,
+pub(crate) struct Token {
+    pub(crate) token_type: TokenType,
+    pub(crate) prefix: CompactString,
+    pub(crate) text: CompactString,
+    pub(crate) spos: Pos,
+    pub(crate) epos: Pos,
 }
 
 impl Token {
-    pub fn new(token_type: TokenType, prefix: &str, text: &str, spos: Pos, epos: Pos) -> Self {
+    pub(crate) fn new(
+        token_type: TokenType,
+        prefix: &str,
+        text: &str,
+        spos: Pos,
+        epos: Pos,
+    ) -> Self {
         Self {
             token_type,
             prefix: CompactString::from(prefix),

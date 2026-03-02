@@ -5,7 +5,7 @@ use crate::token::TokenType;
 /// Directly mirrors the Python IntEnum with 15 levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-pub enum OperatorPrecedence {
+pub(crate) enum OperatorPrecedence {
     DoubleColon = 0,
     As = 1,
     SquareBrackets = 2,
@@ -44,7 +44,7 @@ fn eq_ignore_case_ws(input: &str, target: &str) -> bool {
 
 impl OperatorPrecedence {
     /// The 7 tier boundaries used for merge decisions.
-    pub fn tiers() -> &'static [OperatorPrecedence] {
+    pub(crate) fn tiers() -> &'static [OperatorPrecedence] {
         &[
             Self::OtherTight,
             Self::Multiplication,
@@ -57,7 +57,7 @@ impl OperatorPrecedence {
     }
 
     /// Determine precedence from a Node.
-    pub fn from_node(node: &Node, arena: &[Node]) -> Self {
+    pub(crate) fn from_node(node: &Node, arena: &[Node]) -> Self {
         match node.token.token_type {
             TokenType::DoubleColon => Self::DoubleColon,
             TokenType::On => Self::On,

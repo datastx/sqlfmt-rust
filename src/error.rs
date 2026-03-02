@@ -30,7 +30,7 @@ pub enum SqlfmtError {
 
 /// Internal control flow signals (never exposed to users).
 #[derive(Debug)]
-pub enum ControlFlow {
+pub(crate) enum ControlFlow {
     CannotMerge,
 }
 

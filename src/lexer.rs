@@ -5,7 +5,7 @@ use crate::token::TokenType;
 
 /// Lexer context states, replacing the rule_stack of Vec<&'static [Rule]>.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LexState {
+pub(crate) enum LexState {
     Main,
     FmtOff,
     JinjaSetBlock,
@@ -19,11 +19,11 @@ pub enum LexState {
 
 /// Result of a single lex step: what action to take, how far to advance,
 /// and the prefix/token_text slices (byte offsets into `remaining`).
-pub struct LexResult<'a> {
-    pub action: &'static Action,
-    pub match_len: usize,
-    pub prefix: &'a str,
-    pub token_text: &'a str,
+pub(crate) struct LexResult<'a> {
+    pub(crate) action: &'static Action,
+    pub(crate) match_len: usize,
+    pub(crate) prefix: &'a str,
+    pub(crate) token_text: &'a str,
 }
 
 // ---- Static action constants ----
@@ -1383,7 +1383,7 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
 
 /// Lex one token from `remaining` (source[pos..]) using byte dispatch.
 /// Returns a LexResult with the action, match_len, prefix, and token_text.
-pub fn lex_one<'a>(remaining: &'a str, state: LexState) -> Option<LexResult<'a>> {
+pub(crate) fn lex_one<'a>(remaining: &'a str, state: LexState) -> Option<LexResult<'a>> {
     let bytes = remaining.as_bytes();
     if bytes.is_empty() {
         return None;
@@ -2259,7 +2259,9 @@ fn classify_keyword<'a>(
     if has_paren && matches!(first_word_lower, "filter" | "isnull" | "offset") {
         // Include up through the ( in the match
         let rest = &after_prefix_str[full_text.len()..];
-        let paren_pos = rest.find('(').unwrap();
+        let paren_pos = rest
+            .find('(')
+            .expect("has_paren guard guarantees '(' exists");
         let text_with_paren = &after_prefix_str[..full_text.len() + paren_pos + 1];
         return (&A_KW_BEFORE_PAREN_NAME, text_with_paren);
     }
@@ -2267,7 +2269,9 @@ fn classify_keyword<'a>(
     // Star modifiers: except(), exclude(), replace() — before paren, if preceded by *
     if has_paren && matches!(first_word_lower, "except" | "exclude" | "replace") {
         let rest = &after_prefix_str[full_text.len()..];
-        let paren_pos = rest.find('(').unwrap();
+        let paren_pos = rest
+            .find('(')
+            .expect("has_paren guard guarantees '(' exists");
         let text_with_paren = &after_prefix_str[..full_text.len() + paren_pos + 1];
         return (&A_RESERVED_KW_BEFORE_PAREN_WORD_OP, text_with_paren);
     }
@@ -2280,7 +2284,9 @@ fn classify_keyword<'a>(
         )
     {
         let rest = &after_prefix_str[full_text.len()..];
-        let paren_pos = rest.find('(').unwrap();
+        let paren_pos = rest
+            .find('(')
+            .expect("has_paren guard guarantees '(' exists");
         let text_with_paren = &after_prefix_str[..full_text.len() + paren_pos + 1];
         return (&A_KW_BEFORE_PAREN_NAME, text_with_paren);
     }

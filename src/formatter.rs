@@ -14,13 +14,13 @@ use crate::token::TokenType;
 ///   3. Dedent Jinja blocks
 ///   4. Merge short lines
 ///   5. Remove extra blank lines
-pub struct QueryFormatter {
+pub(crate) struct QueryFormatter {
     line_length: usize,
     no_jinjafmt: bool,
 }
 
 impl QueryFormatter {
-    pub fn new(line_length: usize, no_jinjafmt: bool) -> Self {
+    pub(crate) fn new(line_length: usize, no_jinjafmt: bool) -> Self {
         Self {
             line_length,
             no_jinjafmt,
@@ -28,7 +28,7 @@ impl QueryFormatter {
     }
 
     /// Run the full formatting pipeline on a query.
-    pub fn format(&self, query: &mut Query, arena: &mut Vec<Node>) {
+    pub(crate) fn format(&self, query: &mut Query, arena: &mut Vec<Node>) {
         self.split_lines(query, arena);
 
         if !self.no_jinjafmt {

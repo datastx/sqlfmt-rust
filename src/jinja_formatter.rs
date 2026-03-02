@@ -7,19 +7,19 @@ use crate::token::TokenType;
 
 /// JinjaFormatter normalizes whitespace in Jinja tags and formats
 /// long Jinja expressions across multiple lines (like Python's black formatter).
-pub struct JinjaFormatter {
-    pub max_length: usize,
+pub(crate) struct JinjaFormatter {
+    pub(crate) max_length: usize,
 }
 
 impl JinjaFormatter {
-    pub fn new(max_length: usize) -> Self {
+    pub(crate) fn new(max_length: usize) -> Self {
         Self { max_length }
     }
 
     /// Format Jinja tags in a line.
     /// First normalizes whitespace, then applies multiline formatting
     /// if the line would exceed max_length.
-    pub fn format_line(&self, line: &mut Line, arena: &mut [Node]) {
+    pub(crate) fn format_line(&self, line: &mut Line, arena: &mut [Node]) {
         let base_indent = line.indent_size(arena);
 
         for &idx in &line.nodes {
@@ -319,116 +319,141 @@ impl JinjaFormatter {
         let mut i = 0;
         while i < bytes.len() {
             if bytes[i] == b'"' {
-                if i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
-                    result.push_str("\"\"\"");
-                    i += 3;
-                    while i < bytes.len() {
-                        if i + 2 < bytes.len()
-                            && bytes[i] == b'"'
-                            && bytes[i + 1] == b'"'
-                            && bytes[i + 2] == b'"'
-                        {
-                            result.push_str("\"\"\"");
-                            i += 3;
-                            break;
-                        }
-                        result.push(bytes[i] as char);
-                        i += 1;
-                    }
-                    continue;
-                }
-                result.push('"');
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        result.push(bytes[i] as char);
-                        result.push(bytes[i + 1] as char);
-                        i += 2;
-                        continue;
-                    }
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-                continue;
-            }
-            if bytes[i] == b'\'' {
-                if i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
-                    let start = i;
-                    i += 3;
-                    let mut has_double_quote = false;
-                    let mut end = None;
-                    while i < bytes.len() {
-                        if i + 2 < bytes.len()
-                            && bytes[i] == b'\''
-                            && bytes[i + 1] == b'\''
-                            && bytes[i + 2] == b'\''
-                        {
-                            end = Some(i + 2);
-                            break;
-                        }
-                        if bytes[i] == b'"' {
-                            has_double_quote = true;
-                        }
-                        i += 1;
-                    }
-                    if let Some(end_pos) = end {
-                        if has_double_quote {
-                            result.push_str(&content[start..=end_pos]);
-                        } else {
-                            result.push_str("\"\"\"");
-                            result.push_str(&content[start + 3..end_pos - 2]);
-                            result.push_str("\"\"\"");
-                        }
-                        i = end_pos + 1;
-                    } else {
-                        result.push_str(&content[start..]);
-                        break;
-                    }
-                    continue;
-                }
-                let start = i;
-                i += 1;
-                let mut has_double_quote = false;
-                let mut end = None;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        i += 2; // skip escaped char
-                        continue;
-                    }
-                    if bytes[i] == b'"' {
-                        has_double_quote = true;
-                    }
-                    if bytes[i] == b'\'' {
-                        end = Some(i);
-                        break;
-                    }
-                    i += 1;
-                }
-                if let Some(end_pos) = end {
-                    if has_double_quote {
-                        // Keep single quotes if string contains unescaped double quotes
-                        result.push_str(&content[start..=end_pos]);
-                    } else {
-                        result.push('"');
-                        result.push_str(&content[start + 1..end_pos]);
-                        result.push('"');
-                    }
-                    i = end_pos + 1;
-                } else {
-                    // No matching close quote found, keep as-is
-                    result.push_str(&content[start..]);
-                    break;
-                }
+                i = Self::copy_double_quoted(bytes, i, &mut result);
+            } else if bytes[i] == b'\'' {
+                i = Self::convert_single_quoted(content, bytes, i, &mut result);
             } else {
                 result.push(bytes[i] as char);
                 i += 1;
             }
         }
         result
+    }
+
+    /// Copy a double-quoted string (regular or triple) verbatim into result.
+    /// Returns the new position after the closing quote(s).
+    fn copy_double_quoted(bytes: &[u8], start: usize, result: &mut String) -> usize {
+        let mut i = start;
+        if i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+            result.push_str("\"\"\"");
+            i += 3;
+            while i < bytes.len() {
+                if i + 2 < bytes.len()
+                    && bytes[i] == b'"'
+                    && bytes[i + 1] == b'"'
+                    && bytes[i + 2] == b'"'
+                {
+                    result.push_str("\"\"\"");
+                    i += 3;
+                    return i;
+                }
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+            return i;
+        }
+        result.push('"');
+        i += 1;
+        while i < bytes.len() && bytes[i] != b'"' {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                result.push(bytes[i] as char);
+                result.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+        if i < bytes.len() {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+        i
+    }
+
+    /// Convert a single-quoted string (regular or triple) to double quotes.
+    /// Keeps single quotes if the string contains unescaped double quotes.
+    /// Returns the new position after the closing quote(s).
+    fn convert_single_quoted(
+        content: &str,
+        bytes: &[u8],
+        start: usize,
+        result: &mut String,
+    ) -> usize {
+        let mut i = start;
+        if i + 2 < bytes.len() && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'' {
+            return Self::convert_single_triple_quoted(content, bytes, start, result);
+        }
+        i += 1;
+        let mut has_double_quote = false;
+        let mut end = None;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'"' {
+                has_double_quote = true;
+            }
+            if bytes[i] == b'\'' {
+                end = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        if let Some(end_pos) = end {
+            if has_double_quote {
+                result.push_str(&content[start..=end_pos]);
+            } else {
+                result.push('"');
+                result.push_str(&content[start + 1..end_pos]);
+                result.push('"');
+            }
+            end_pos + 1
+        } else {
+            result.push_str(&content[start..]);
+            bytes.len()
+        }
+    }
+
+    /// Convert a triple-single-quoted string to triple-double-quoted.
+    /// Returns the new position after the closing quotes.
+    fn convert_single_triple_quoted(
+        content: &str,
+        bytes: &[u8],
+        start: usize,
+        result: &mut String,
+    ) -> usize {
+        let mut i = start + 3;
+        let mut has_double_quote = false;
+        let mut end = None;
+        while i < bytes.len() {
+            if i + 2 < bytes.len()
+                && bytes[i] == b'\''
+                && bytes[i + 1] == b'\''
+                && bytes[i + 2] == b'\''
+            {
+                end = Some(i + 2);
+                break;
+            }
+            if bytes[i] == b'"' {
+                has_double_quote = true;
+            }
+            i += 1;
+        }
+        if let Some(end_pos) = end {
+            if has_double_quote {
+                result.push_str(&content[start..=end_pos]);
+            } else {
+                result.push_str("\"\"\"");
+                result.push_str(&content[start + 3..end_pos - 2]);
+                result.push_str("\"\"\"");
+            }
+            end_pos + 1
+        } else {
+            result.push_str(&content[start..]);
+            bytes.len()
+        }
     }
 
     /// Strip paren spaces, writing into the provided buffer.
@@ -546,75 +571,24 @@ impl JinjaFormatter {
                 let args = split_by_commas(args_content);
 
                 if args.len() <= 1 {
-                    let single_arg = args.first().map(|a| a.trim()).unwrap_or("");
-                    if single_arg.starts_with('[') && single_arg.ends_with(']') {
-                        let list_content = &single_arg[1..single_arg.len() - 1];
-                        let list_items = split_by_commas(list_content);
-                        if list_items.len() > 1 {
-                            let indent1 = indent_str(base_indent + 4);
-                            let indent2 = indent_str(base_indent + 8);
-                            let indent3 = indent_str(base_indent + 12);
-                            let close_indent = indent_str(base_indent);
-
-                            let mut result = String::with_capacity(256);
-                            result.push_str(open);
-                            result.push('\n');
-                            result.push_str(indent1);
-                            result.push_str(func_name);
-                            result.push_str("(\n");
-                            result.push_str(indent2);
-                            result.push_str("[\n");
-                            for item in &list_items {
-                                let trimmed_item = item.trim();
-                                if !trimmed_item.is_empty() {
-                                    result.push_str(indent3);
-                                    result.push_str(trimmed_item);
-                                    result.push_str(",\n");
-                                }
-                            }
-                            result.push_str(indent2);
-                            result.push_str("]\n");
-                            result.push_str(indent1);
-                            result.push_str(")\n");
-                            result.push_str(close_indent);
-                            result.push_str(close);
-                            return Some(result);
-                        }
+                    if let Some(result) =
+                        Self::format_func_with_list_arg(func_name, &args, base_indent, open, close)
+                    {
+                        return Some(result);
                     }
+                    let single_arg = args.first().map(|a| a.trim()).unwrap_or("");
                     if single_arg.len() < 40 {
                         return None;
                     }
                 }
 
-                let indent1 = indent_str(base_indent + 4);
-                let indent2 = indent_str(base_indent + 8);
-                let close_indent = indent_str(base_indent);
-
-                let mut result = String::with_capacity(256);
-                result.push_str(open);
-                result.push('\n');
-                result.push_str(indent1);
-                result.push_str(func_name);
-                result.push_str("(\n");
-                for arg in &args {
-                    let trimmed_arg = arg.trim();
-                    if !trimmed_arg.is_empty() {
-                        result.push_str(indent2);
-                        result.push_str(trimmed_arg);
-                        result.push_str(",\n");
-                    }
-                }
-                // Remove trailing comma for single-arg functions
-                if args.len() == 1 && result.ends_with(",\n") {
-                    result.truncate(result.len() - 2);
-                    result.push('\n');
-                }
-                result.push_str(indent1);
-                result.push_str(")\n");
-                result.push_str(close_indent);
-                result.push_str(close);
-
-                return Some(result);
+                return Some(Self::format_func_call_multiline(
+                    func_name,
+                    &args,
+                    base_indent,
+                    open,
+                    close,
+                ));
             }
         }
 
@@ -624,6 +598,92 @@ impl JinjaFormatter {
             "{}\n{}{}\n{}{}",
             open, indent1, inner, close_indent, close
         ))
+    }
+
+    /// Format a function call whose single argument is a list with multiple items.
+    /// Returns None if the argument isn't a multi-item list.
+    fn format_func_with_list_arg(
+        func_name: &str,
+        args: &[&str],
+        base_indent: usize,
+        open: &str,
+        close: &str,
+    ) -> Option<String> {
+        let single_arg = args.first().map(|a| a.trim()).unwrap_or("");
+        if !single_arg.starts_with('[') || !single_arg.ends_with(']') {
+            return None;
+        }
+        let list_content = &single_arg[1..single_arg.len() - 1];
+        let list_items = split_by_commas(list_content);
+        if list_items.len() <= 1 {
+            return None;
+        }
+
+        let indent1 = indent_str(base_indent + 4);
+        let indent2 = indent_str(base_indent + 8);
+        let indent3 = indent_str(base_indent + 12);
+        let close_indent = indent_str(base_indent);
+
+        let mut result = String::with_capacity(256);
+        result.push_str(open);
+        result.push('\n');
+        result.push_str(indent1);
+        result.push_str(func_name);
+        result.push_str("(\n");
+        result.push_str(indent2);
+        result.push_str("[\n");
+        for item in &list_items {
+            let trimmed_item = item.trim();
+            if !trimmed_item.is_empty() {
+                result.push_str(indent3);
+                result.push_str(trimmed_item);
+                result.push_str(",\n");
+            }
+        }
+        result.push_str(indent2);
+        result.push_str("]\n");
+        result.push_str(indent1);
+        result.push_str(")\n");
+        result.push_str(close_indent);
+        result.push_str(close);
+        Some(result)
+    }
+
+    /// Format a function call with arguments across multiple lines.
+    fn format_func_call_multiline(
+        func_name: &str,
+        args: &[&str],
+        base_indent: usize,
+        open: &str,
+        close: &str,
+    ) -> String {
+        let indent1 = indent_str(base_indent + 4);
+        let indent2 = indent_str(base_indent + 8);
+        let close_indent = indent_str(base_indent);
+
+        let mut result = String::with_capacity(256);
+        result.push_str(open);
+        result.push('\n');
+        result.push_str(indent1);
+        result.push_str(func_name);
+        result.push_str("(\n");
+        for arg in args {
+            let trimmed_arg = arg.trim();
+            if !trimmed_arg.is_empty() {
+                result.push_str(indent2);
+                result.push_str(trimmed_arg);
+                result.push_str(",\n");
+            }
+        }
+        if args.len() == 1 && result.ends_with(",\n") {
+            result.truncate(result.len() - 2);
+            result.push('\n');
+        }
+        result.push_str(indent1);
+        result.push_str(")\n");
+        result.push_str(close_indent);
+        result.push_str(close);
+        result
     }
 
     /// Format a Jinja statement as multiline when it would exceed max_length.
@@ -662,104 +722,17 @@ impl JinjaFormatter {
         let inner = inner.trim();
 
         if let Some(paren_pos) = find_top_level_paren(inner) {
-            if let Some(close_pos) = find_matching_close(inner, paren_pos) {
-                let before_paren = &inner[..paren_pos];
-                let args_content = &inner[paren_pos + 1..close_pos];
-                let after_close = inner[close_pos + 1..].trim();
-                let args = split_by_commas(args_content);
-
-                let indent1 = indent_str(base_indent + 4);
-                let close_indent = indent_str(base_indent);
-
-                let mut result = String::with_capacity(256);
-                result.push_str(open_delim);
-                result.push(' ');
-                result.push_str(before_paren);
-                result.push('(');
-                let strip_trailing_comma = args.len() == 1 || !args_content.trim().ends_with(',');
-                let arg_count = args.len();
-                for (ai, arg) in args.iter().enumerate() {
-                    let trimmed_arg = arg.trim();
-                    if !trimmed_arg.is_empty() {
-                        result.push('\n');
-                        result.push_str(indent1);
-                        result.push_str(trimmed_arg);
-                        if ai == arg_count - 1 && strip_trailing_comma {
-                            // Don't add trailing comma
-                        } else {
-                            result.push(',');
-                        }
-                    }
-                }
-                result.push('\n');
-                result.push_str(close_indent);
-                result.push_str(") ");
-                if !after_close.is_empty() {
-                    result.push_str(after_close);
-                    result.push(' ');
-                }
-                result.push_str(close_delim);
-
+            if let Some(result) =
+                Self::format_stmt_paren(inner, paren_pos, base_indent, open_delim, close_delim)
+            {
                 return Some(result);
             }
         }
 
         if let Some(bracket_pos) = find_top_level_bracket(inner) {
-            if inner.ends_with(']') {
-                let before_bracket = &inner[..bracket_pos];
-                let list_content = &inner[bracket_pos + 1..inner.len() - 1];
-                let items = split_by_commas(list_content);
-
-                if items.len() <= 1 {
-                    let tilde_parts = split_by_tilde(list_content);
-                    if tilde_parts.len() > 1 {
-                        let indent1 = indent_str(base_indent + 4);
-                        let close_indent = indent_str(base_indent);
-                        let mut result = String::with_capacity(256);
-                        result.push_str(open_delim);
-                        result.push(' ');
-                        result.push_str(before_bracket);
-                        result.push('[');
-                        for (i, part) in tilde_parts.iter().enumerate() {
-                            let trimmed_part = part.trim();
-                            result.push('\n');
-                            result.push_str(indent1);
-                            if i > 0 {
-                                result.push_str("~ ");
-                            }
-                            result.push_str(trimmed_part);
-                        }
-                        result.push('\n');
-                        result.push_str(close_indent);
-                        result.push_str("] ");
-                        result.push_str(close_delim);
-                        return Some(result);
-                    }
-                    return None;
-                }
-
-                let indent1 = indent_str(base_indent + 4);
-                let close_indent = indent_str(base_indent);
-
-                let mut result = String::with_capacity(256);
-                result.push_str(open_delim);
-                result.push(' ');
-                result.push_str(before_bracket);
-                result.push('[');
-                for item in &items {
-                    let trimmed_item = item.trim();
-                    if !trimmed_item.is_empty() {
-                        result.push('\n');
-                        result.push_str(indent1);
-                        result.push_str(trimmed_item);
-                        result.push(',');
-                    }
-                }
-                result.push('\n');
-                result.push_str(close_indent);
-                result.push_str("] ");
-                result.push_str(close_delim);
-
+            if let Some(result) =
+                Self::format_stmt_bracket(inner, bracket_pos, base_indent, open_delim, close_delim)
+            {
                 return Some(result);
             }
         }
@@ -774,6 +747,138 @@ impl JinjaFormatter {
         }
 
         None
+    }
+
+    /// Format a statement's parenthesized arguments across multiple lines.
+    fn format_stmt_paren(
+        inner: &str,
+        paren_pos: usize,
+        base_indent: usize,
+        open_delim: &str,
+        close_delim: &str,
+    ) -> Option<String> {
+        let close_pos = find_matching_close(inner, paren_pos)?;
+        let before_paren = &inner[..paren_pos];
+        let args_content = &inner[paren_pos + 1..close_pos];
+        let after_close = inner[close_pos + 1..].trim();
+        let args = split_by_commas(args_content);
+
+        let indent1 = indent_str(base_indent + 4);
+        let close_indent = indent_str(base_indent);
+
+        let mut result = String::with_capacity(256);
+        result.push_str(open_delim);
+        result.push(' ');
+        result.push_str(before_paren);
+        result.push('(');
+        let strip_trailing_comma = args.len() == 1 || !args_content.trim().ends_with(',');
+        let arg_count = args.len();
+        for (ai, arg) in args.iter().enumerate() {
+            let trimmed_arg = arg.trim();
+            if !trimmed_arg.is_empty() {
+                result.push('\n');
+                result.push_str(indent1);
+                result.push_str(trimmed_arg);
+                if !(ai == arg_count - 1 && strip_trailing_comma) {
+                    result.push(',');
+                }
+            }
+        }
+        result.push('\n');
+        result.push_str(close_indent);
+        result.push_str(") ");
+        if !after_close.is_empty() {
+            result.push_str(after_close);
+            result.push(' ');
+        }
+        result.push_str(close_delim);
+
+        Some(result)
+    }
+
+    /// Format a statement's bracketed list across multiple lines.
+    fn format_stmt_bracket(
+        inner: &str,
+        bracket_pos: usize,
+        base_indent: usize,
+        open_delim: &str,
+        close_delim: &str,
+    ) -> Option<String> {
+        if !inner.ends_with(']') {
+            return None;
+        }
+        let before_bracket = &inner[..bracket_pos];
+        let list_content = &inner[bracket_pos + 1..inner.len() - 1];
+        let items = split_by_commas(list_content);
+
+        if items.len() <= 1 {
+            let tilde_parts = split_by_tilde(list_content);
+            if tilde_parts.len() > 1 {
+                return Some(Self::format_stmt_tilde_list(
+                    &tilde_parts,
+                    before_bracket,
+                    base_indent,
+                    open_delim,
+                    close_delim,
+                ));
+            }
+            return None;
+        }
+
+        let indent1 = indent_str(base_indent + 4);
+        let close_indent = indent_str(base_indent);
+
+        let mut result = String::with_capacity(256);
+        result.push_str(open_delim);
+        result.push(' ');
+        result.push_str(before_bracket);
+        result.push('[');
+        for item in &items {
+            let trimmed_item = item.trim();
+            if !trimmed_item.is_empty() {
+                result.push('\n');
+                result.push_str(indent1);
+                result.push_str(trimmed_item);
+                result.push(',');
+            }
+        }
+        result.push('\n');
+        result.push_str(close_indent);
+        result.push_str("] ");
+        result.push_str(close_delim);
+
+        Some(result)
+    }
+
+    /// Format a tilde-separated list across multiple lines.
+    fn format_stmt_tilde_list(
+        tilde_parts: &[&str],
+        before_bracket: &str,
+        base_indent: usize,
+        open_delim: &str,
+        close_delim: &str,
+    ) -> String {
+        let indent1 = indent_str(base_indent + 4);
+        let close_indent = indent_str(base_indent);
+        let mut result = String::with_capacity(256);
+        result.push_str(open_delim);
+        result.push(' ');
+        result.push_str(before_bracket);
+        result.push('[');
+        for (i, part) in tilde_parts.iter().enumerate() {
+            let trimmed_part = part.trim();
+            result.push('\n');
+            result.push_str(indent1);
+            if i > 0 {
+                result.push_str("~ ");
+            }
+            result.push_str(trimmed_part);
+        }
+        result.push('\n');
+        result.push_str(close_indent);
+        result.push_str("] ");
+        result.push_str(close_delim);
+        result
     }
 }
 

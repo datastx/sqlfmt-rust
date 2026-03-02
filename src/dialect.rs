@@ -18,25 +18,25 @@ pub trait Dialect: Send + Sync {
 
 /// The default dialect. Covers common usage across Snowflake, DuckDB,
 /// PostgreSQL, MySQL, BigQuery, and SparkSQL.
-pub struct Polyglot;
+pub(crate) struct Polyglot;
 
 impl Dialect for Polyglot {}
 
 /// ClickHouse dialect: same rules as Polyglot.
 /// Note: ClickHouse identifiers are technically case-sensitive at the engine level,
 /// but Python sqlfmt lowercases them like all other dialects.
-pub struct ClickHouse;
+pub(crate) struct ClickHouse;
 
 impl Dialect for ClickHouse {}
 
 /// DuckDB dialect: same as Polyglot for now; can be extended with DuckDB-specific
 /// keywords and syntax.
-pub struct DuckDb;
+pub(crate) struct DuckDb;
 
 impl Dialect for DuckDb {}
 
 /// Create a dialect from a string name.
-pub fn dialect_from_name(name: &str) -> Result<Box<dyn Dialect>, SqlfmtError> {
+pub(crate) fn dialect_from_name(name: &str) -> Result<Box<dyn Dialect>, SqlfmtError> {
     match name.to_ascii_lowercase().as_str() {
         "polyglot" => Ok(Box::new(Polyglot)),
         "clickhouse" => Ok(Box::new(ClickHouse)),

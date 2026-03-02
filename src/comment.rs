@@ -6,14 +6,14 @@ const COMMENT_MARKERS: &[&str] = &["--", "#", "//", "/*", "{#"];
 
 /// A SQL comment, extracted during lexing.
 #[derive(Debug, Clone)]
-pub struct Comment {
-    pub token: Token,
-    pub is_standalone: bool,
-    pub previous_node: Option<NodeIndex>,
+pub(crate) struct Comment {
+    pub(crate) token: Token,
+    pub(crate) is_standalone: bool,
+    pub(crate) previous_node: Option<NodeIndex>,
 }
 
 impl Comment {
-    pub fn new(token: Token, is_standalone: bool, previous_node: Option<NodeIndex>) -> Self {
+    pub(crate) fn new(token: Token, is_standalone: bool, previous_node: Option<NodeIndex>) -> Self {
         Self {
             token,
             is_standalone,
@@ -21,24 +21,24 @@ impl Comment {
         }
     }
 
-    pub fn is_multiline(&self) -> bool {
+    pub(crate) fn is_multiline(&self) -> bool {
         self.token.text.contains('\n')
     }
 
-    pub fn is_c_style(&self) -> bool {
+    pub(crate) fn is_c_style(&self) -> bool {
         self.token.text.starts_with("/*")
     }
 
-    pub fn is_jinja_comment(&self) -> bool {
+    pub(crate) fn is_jinja_comment(&self) -> bool {
         self.token.text.starts_with("{#")
     }
 
-    pub fn is_inline(&self) -> bool {
+    pub(crate) fn is_inline(&self) -> bool {
         !self.is_standalone && !self.is_multiline()
     }
 
     /// Return the comment marker (e.g., "--", "/*", "{#-").
-    pub fn marker(&self) -> &str {
+    pub(crate) fn marker(&self) -> &str {
         let text = &self.token.text;
         for marker in COMMENT_MARKERS {
             if text.starts_with(marker) {
@@ -53,7 +53,7 @@ impl Comment {
 
     /// Return the output marker.
     /// Python sqlfmt normalizes `//` to `--` but preserves `#` as-is.
-    pub fn output_marker(&self) -> &str {
+    pub(crate) fn output_marker(&self) -> &str {
         let m = self.marker();
         if m == "//" {
             "--"
@@ -64,7 +64,7 @@ impl Comment {
 
     /// Return the comment body (text after the marker, leading whitespace trimmed).
     /// Trailing whitespace is preserved to match Python sqlfmt behavior.
-    pub fn body(&self) -> &str {
+    pub(crate) fn body(&self) -> &str {
         let text = &self.token.text;
         let marker = self.marker();
         let after_marker = &text[marker.len()..];
@@ -72,7 +72,7 @@ impl Comment {
     }
 
     /// Render as inline comment: `  -- comment text`
-    pub fn render_inline(&self) -> String {
+    pub(crate) fn render_inline(&self) -> String {
         if self.is_c_style() {
             // Preserve C-style comments exactly (especially hints like /*+ ... */)
             format!("  {}", self.token.text.trim())
@@ -82,7 +82,7 @@ impl Comment {
     }
 
     /// Render as standalone comment on its own line(s).
-    pub fn render_standalone(&self, prefix: &str, max_line_length: usize) -> String {
+    pub(crate) fn render_standalone(&self, prefix: &str, max_line_length: usize) -> String {
         if self.is_multiline() || self.is_c_style() || self.is_jinja_comment() {
             return format!("{}{}\n", prefix, self.token.text.trim());
         }
