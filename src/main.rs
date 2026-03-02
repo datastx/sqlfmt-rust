@@ -18,7 +18,7 @@ struct Cli {
     #[arg(short = 'l', long, default_value_t = 88)]
     line_length: usize,
 
-    /// SQL dialect: polyglot, duckdb, clickhouse.
+    /// SQL dialect: polyglot, duckdb.
     #[arg(short = 'd', long, default_value = "polyglot")]
     dialect: String,
 
@@ -42,10 +42,6 @@ struct Cli {
     #[arg(long)]
     exclude: Vec<String>,
 
-    /// File encoding.
-    #[arg(long, default_value = "utf-8")]
-    encoding: String,
-
     /// Verbose output.
     #[arg(short, long)]
     verbose: bool,
@@ -54,18 +50,6 @@ struct Cli {
     #[arg(short, long)]
     quiet: bool,
 
-    /// Disable progress bar.
-    #[arg(long)]
-    no_progressbar: bool,
-
-    /// Force color output.
-    #[arg(long)]
-    force_color: bool,
-
-    /// Disable color output.
-    #[arg(long)]
-    no_color: bool,
-
     /// Number of threads for parallel processing (0 = all cores).
     #[arg(short = 't', long, default_value_t = 0)]
     threads: usize,
@@ -73,10 +57,6 @@ struct Cli {
     /// Disable multi-threaded processing.
     #[arg(long)]
     single_process: bool,
-
-    /// Reset formatting cache.
-    #[arg(short = 'k', long)]
-    reset_cache: bool,
 
     /// Path to config file (pyproject.toml or sqlfmt.toml).
     #[arg(long)]
@@ -126,19 +106,14 @@ fn main() {
         } else {
             cli.exclude
         },
-        encoding: cli.encoding,
         verbose: cli.verbose,
         quiet: cli.quiet,
-        no_progressbar: cli.no_progressbar,
-        no_color: cli.no_color,
-        force_color: cli.force_color,
         threads: if cli.threads != 0 {
             cli.threads
         } else {
             env_threads
         },
         single_process: cli.single_process,
-        reset_cache: cli.reset_cache,
     };
 
     // Build the tokio runtime, capping both async workers and blocking threads.

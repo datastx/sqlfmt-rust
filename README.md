@@ -105,7 +105,7 @@ Arguments:
 
 Options:
   -l, --line-length <LINE_LENGTH>  Maximum line length [default: 88]
-  -d, --dialect <DIALECT>          SQL dialect: polyglot, duckdb, clickhouse [default: polyglot]
+  -d, --dialect <DIALECT>          SQL dialect: polyglot, duckdb [default: polyglot]
       --check                      Check formatting without writing changes
       --diff                       Show formatting diff
       --fast                       Skip safety equivalence check (faster)

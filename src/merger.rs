@@ -607,7 +607,8 @@ impl LineMerger {
         arena: &[Node],
     ) -> bool {
         match segment.head(arena) {
-            Err(_) => true, // blank segment, keep scanning
+            // blank segment, keep scanning
+            Err(_) => true,
             Ok((_, line)) => {
                 let starts_with_comma = line.starts_with_comma(arena);
                 let starts_with_op = line

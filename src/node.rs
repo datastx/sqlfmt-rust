@@ -26,7 +26,6 @@ pub(crate) struct Node {
     pub(crate) formatting_disabled: bool,
 }
 
-#[allow(dead_code)] // Many methods are used only by tests
 impl Node {
     pub(crate) fn new(
         token: Token,
@@ -52,14 +51,6 @@ impl Node {
         (self.bracket_depth as usize, self.jinja_depth as usize)
     }
 
-    /// Formatted string: prefix + value.
-    pub(crate) fn to_formatted_string(&self) -> String {
-        let mut s = String::with_capacity(self.prefix.len() + self.value.len());
-        s.push_str(&self.prefix);
-        s.push_str(&self.value);
-        s
-    }
-
     /// Push formatted string (prefix + value) directly into the given buffer.
     /// Avoids allocating a temporary String.
     #[inline]
@@ -71,10 +62,6 @@ impl Node {
     /// Character length of the formatted string.
     pub(crate) fn len(&self) -> usize {
         self.prefix.len() + self.value.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     // --- Token type classification ---
@@ -106,10 +93,6 @@ impl Node {
         self.token.token_type == TokenType::JinjaBlockEnd
     }
 
-    pub(crate) fn is_jinja(&self) -> bool {
-        self.token.token_type.is_jinja()
-    }
-
     pub(crate) fn is_boolean_operator(&self) -> bool {
         self.token.token_type == TokenType::BooleanOperator
     }
@@ -124,42 +107,6 @@ impl Node {
 
     pub(crate) fn divides_queries(&self) -> bool {
         self.token.token_type.divides_queries()
-    }
-
-    pub(crate) fn is_set_operator(&self) -> bool {
-        self.token.token_type == TokenType::SetOperator
-    }
-
-    pub(crate) fn is_semicolon(&self) -> bool {
-        self.token.token_type == TokenType::Semicolon
-    }
-
-    pub(crate) fn is_star(&self) -> bool {
-        self.token.token_type == TokenType::Star
-    }
-
-    pub(crate) fn is_name(&self) -> bool {
-        self.token.token_type == TokenType::Name
-    }
-
-    pub(crate) fn is_quoted_name(&self) -> bool {
-        self.token.token_type == TokenType::QuotedName
-    }
-
-    pub(crate) fn is_dot(&self) -> bool {
-        self.token.token_type == TokenType::Dot
-    }
-
-    pub(crate) fn is_comment(&self) -> bool {
-        self.token.token_type == TokenType::Comment
-    }
-
-    pub(crate) fn is_fmt_off(&self) -> bool {
-        self.token.token_type == TokenType::FmtOff
-    }
-
-    pub(crate) fn is_fmt_on(&self) -> bool {
-        self.token.token_type == TokenType::FmtOn
     }
 
     // --- Context-dependent classification ---

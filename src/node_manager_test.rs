@@ -94,17 +94,6 @@ fn test_union_depth_resets_to_zero() {
 }
 
 #[test]
-fn test_capitalization_clickhouse_preserves_case() {
-    let nm = NodeManager::new(true); // case_sensitive_names = true
-    let token = Token::new(TokenType::Name, "", "myFunction", 0, 10);
-    assert_eq!(
-        nm.standardize_value(&token),
-        "myFunction",
-        "Case-sensitive mode should preserve function name casing"
-    );
-}
-
-#[test]
 fn test_capitalization_operators_lowercased() {
     let nm = NodeManager::new(false);
     let operators = vec![

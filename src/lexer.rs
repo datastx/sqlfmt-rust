@@ -409,9 +409,11 @@ pub(crate) fn scan_dollar_string(bytes: &[u8]) -> usize {
         tag_end += 1;
     }
     if tag_end >= bytes.len() || bytes[tag_end] != b'$' {
-        return 0; // Not a dollar-quoted string
+        // Not a dollar-quoted string
+        return 0;
     }
-    let tag = &bytes[..tag_end + 1]; // e.g. $$ or $tag$
+    // e.g. $$ or $tag$
+    let tag = &bytes[..tag_end + 1];
     let tag_len = tag.len();
 
     // Find matching closing tag
@@ -710,7 +712,8 @@ fn try_multi_word_base(first_lower: &str, after_word: &[u8]) -> Option<usize> {
             &[
                 &["as", "struct"],
                 &["as", "value"],
-                &["into"], // select into
+                // select into
+                &["into"],
                 &["all"],
                 &["distinct"],
                 // "select top N" handled specially below
@@ -1080,7 +1083,8 @@ fn scan_rest_for_clone(rest: &[u8]) -> bool {
             pos += 1;
         }
         if pos < rest.len() {
-            pos += 1; // skip closing quote
+            // skip closing quote
+            pos += 1;
         } else {
             return false;
         }
@@ -1215,8 +1219,8 @@ fn try_select_top(bytes: &[u8]) -> Option<usize> {
     Some(pos)
 }
 
-/// Scan a compound operator starting at bytes[0].
-/// Returns byte length of the operator, or 0 if no compound operator.
+/// Scan a multi-character operator starting at `bytes[0]` and return its length.
+/// Handles: >= >> <=> <-> <#> <> <= << <@ => == !!= !~* != !~ ->-> ->> -|- -> ||/ || |/ && ** ~* @-@ @> @@ ?| ?& #>> #> #- %%
 fn scan_compound_operator(bytes: &[u8]) -> usize {
     let len = bytes.len();
     if len == 0 {
@@ -1227,8 +1231,8 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         b'>' => {
             if len >= 2 {
                 match bytes[1] {
-                    b'=' => 2, // >=
-                    b'>' => 2, // >>
+                    b'=' => 2,
+                    b'>' => 2,
                     _ => 0,
                 }
             } else {
@@ -1237,20 +1241,20 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'<' => {
             if len >= 3 && bytes[1] == b'=' && bytes[2] == b'>' {
-                return 3; // <=>
+                return 3;
             }
             if len >= 3 && bytes[1] == b'-' && bytes[2] == b'>' {
-                return 3; // <->
+                return 3;
             }
             if len >= 3 && bytes[1] == b'#' && bytes[2] == b'>' {
-                return 3; // <#>
+                return 3;
             }
             if len >= 2 {
                 match bytes[1] {
-                    b'>' => 2, // <>
-                    b'=' => 2, // <=
-                    b'<' => 2, // <<
-                    b'@' => 2, // <@
+                    b'>' => 2,
+                    b'=' => 2,
+                    b'<' => 2,
+                    b'@' => 2,
                     _ => 0,
                 }
             } else {
@@ -1260,8 +1264,8 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         b'=' => {
             if len >= 2 {
                 match bytes[1] {
-                    b'>' => 2, // =>
-                    b'=' => 2, // ==
+                    b'>' => 2,
+                    b'=' => 2,
                     _ => 0,
                 }
             } else {
@@ -1270,15 +1274,15 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'!' => {
             if len >= 3 && bytes[1] == b'!' && bytes[2] == b'=' {
-                return 3; // !!=
+                return 3;
             }
             if len >= 3 && bytes[1] == b'~' && bytes[2] == b'*' {
-                return 3; // !~*
+                return 3;
             }
             if len >= 2 {
                 match bytes[1] {
-                    b'=' => 2, // !=
-                    b'~' => 2, // !~
+                    b'=' => 2,
+                    b'~' => 2,
                     _ => 0,
                 }
             } else {
@@ -1287,27 +1291,27 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'-' => {
             if len >= 4 && bytes[1] == b'>' && bytes[2] == b'-' && bytes[3] == b'>' {
-                return 4; // ->->
+                return 4;
             }
             if len >= 3 && bytes[1] == b'>' && bytes[2] == b'>' {
-                return 3; // ->>
+                return 3;
             }
             if len >= 3 && bytes[1] == b'|' && bytes[2] == b'-' {
-                return 3; // -|-
+                return 3;
             }
             if len >= 2 && bytes[1] == b'>' {
-                return 2; // ->
+                return 2;
             }
             0
         }
         b'|' => {
             if len >= 3 && bytes[1] == b'|' && bytes[2] == b'/' {
-                return 3; // ||/
+                return 3;
             }
             if len >= 2 {
                 match bytes[1] {
-                    b'|' => 2, // ||
-                    b'/' => 2, // |/
+                    b'|' => 2,
+                    b'/' => 2,
                     _ => 0,
                 }
             } else {
@@ -1316,39 +1320,39 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'&' => {
             if len >= 2 && bytes[1] == b'&' {
-                return 2; // &&
+                return 2;
             }
             0
         }
         b'*' => {
             if len >= 2 && bytes[1] == b'*' {
-                return 2; // **
+                return 2;
             }
             0
         }
         b'~' => {
             if len >= 2 && bytes[1] == b'*' {
-                return 2; // ~*
+                return 2;
             }
             0
         }
         b'@' => {
             if len >= 3 && bytes[1] == b'-' && bytes[2] == b'@' {
-                return 3; // @-@
+                return 3;
             }
             if len >= 2 && bytes[1] == b'>' {
-                return 2; // @>
+                return 2;
             }
             if len >= 2 && bytes[1] == b'@' {
-                return 2; // @@
+                return 2;
             }
             0
         }
         b'?' => {
             if len >= 2 {
                 match bytes[1] {
-                    b'|' => 2, // ?|
-                    b'&' => 2, // ?&
+                    b'|' => 2,
+                    b'&' => 2,
                     _ => 0,
                 }
             } else {
@@ -1357,12 +1361,12 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'#' => {
             if len >= 3 && bytes[1] == b'>' && bytes[2] == b'>' {
-                return 3; // #>>
+                return 3;
             }
             if len >= 2 {
                 match bytes[1] {
-                    b'>' => 2, // #>
-                    b'-' => 2, // #-
+                    b'>' => 2,
+                    b'-' => 2,
                     _ => 0,
                 }
             } else {
@@ -1371,7 +1375,7 @@ fn scan_compound_operator(bytes: &[u8]) -> usize {
         }
         b'%' => {
             if len >= 2 && bytes[1] == b'%' {
-                return 2; // %%
+                return 2;
             }
             0
         }
@@ -2242,7 +2246,8 @@ fn classify_keyword<'a>(
         LexState::Function => return classify_function_keyword(full_lower, full_text, has_paren),
         LexState::Warehouse => return classify_warehouse_keyword(full_lower, full_text, has_paren),
         LexState::Clone => return classify_clone_keyword(full_lower, full_text, has_paren),
-        _ => {} // Main state — fall through
+        // Main state -- fall through
+        _ => {}
     }
 
     // Main state keyword classification

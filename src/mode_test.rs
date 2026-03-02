@@ -21,18 +21,6 @@ fn test_dialect_creation() {
 }
 
 #[test]
-fn test_color_logic() {
-    let mut mode = Mode::default();
-    assert!(mode.color());
-
-    mode.no_color = true;
-    assert!(!mode.color());
-
-    mode.force_color = true;
-    assert!(mode.color()); // force_color overrides no_color
-}
-
-#[test]
 fn test_safety_check() {
     let mut mode = Mode::default();
     assert!(mode.should_safety_check());

@@ -18,10 +18,6 @@ pub(crate) enum TokenType {
     JinjaBlockKeyword,
     QuotedName,
     Comment,
-    #[allow(dead_code)] // Defined for API completeness; not yet constructed by lexer
-    CommentStart,
-    #[allow(dead_code)] // Defined for API completeness; not yet constructed by lexer
-    CommentEnd,
     Semicolon,
     StatementStart,
     StatementEnd,
@@ -97,7 +93,6 @@ impl TokenType {
                 | Self::Semicolon
                 | Self::Newline
                 | Self::BracketClose
-                | Self::CommentEnd
                 | Self::DoubleColon
                 | Self::Colon
         )
@@ -115,7 +110,6 @@ impl TokenType {
                 | Self::Star
                 | Self::Number
                 | Self::Comment
-                | Self::CommentStart
                 | Self::UntermKeyword
                 | Self::FmtOff
                 | Self::FmtOn
