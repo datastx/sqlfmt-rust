@@ -9,12 +9,12 @@ use crate::token::{Token, TokenType};
 /// NodeManager creates Nodes from Tokens, tracking bracket depth,
 /// whitespace rules, and formatting state.
 #[derive(Debug, Clone)]
-pub struct NodeManager {
-    pub case_sensitive_names: bool,
+pub(crate) struct NodeManager {
+    pub(crate) case_sensitive_names: bool,
     /// Filtered brackets (no unterm keywords) — used by actions like HandleNonreservedTopLevelKeyword.
-    pub open_brackets: BracketVec,
+    pub(crate) open_brackets: BracketVec,
     /// Current jinja block stack — used by handle_jinja_block_keyword etc.
-    pub open_jinja_blocks: JinjaBlockVec,
+    pub(crate) open_jinja_blocks: JinjaBlockVec,
     /// Formatting-disabled nesting depth. >0 means formatting is disabled.
     /// Uses a counter instead of bool to handle nested Data token push/pop.
     formatting_disabled_depth: u16,
@@ -31,7 +31,7 @@ pub struct NodeManager {
 }
 
 impl NodeManager {
-    pub fn new(case_sensitive_names: bool) -> Self {
+    pub(crate) fn new(case_sensitive_names: bool) -> Self {
         Self {
             case_sensitive_names,
             open_brackets: SmallVec::new(),
@@ -46,7 +46,7 @@ impl NodeManager {
     /// Create a Node from a Token, applying whitespace, casing, and depth rules.
     /// Mirrors Python's NodeManager.create_node() which computes depth from
     /// previous_node's brackets, not from NodeManager state.
-    pub fn create_node(
+    pub(crate) fn create_node(
         &mut self,
         token: Token,
         previous_node: Option<NodeIndex>,
@@ -103,26 +103,53 @@ impl NodeManager {
                 self.node_open_jinja_bracket_snapshots.clear();
             }
             Some(prev_idx) => {
-                let prev = &arena[prev_idx];
-                // LATERAL is an unterm keyword for splitting but does NOT
-                // increase depth for the next node — it's a FROM clause
-                // modifier, not a clause-level keyword.
-                if prev.is_unterm_keyword() || prev.is_opening_bracket() {
-                    let is_lateral_kw =
-                        prev.is_unterm_keyword() && prev.value.eq_ignore_ascii_case("lateral");
-                    if !is_lateral_kw {
-                        self.node_open_brackets.push(prev_idx);
-                    }
-                } else if prev.is_opening_jinja_block() {
-                    // Snapshot brackets before pushing jinja block so we can
-                    // restore them when the block closes.
-                    self.node_open_jinja_bracket_snapshots
-                        .push(self.node_open_brackets.clone());
-                    self.node_open_jinja.push(prev_idx);
-                }
+                self.push_opener_from_previous_node(prev_idx, arena);
             }
         };
 
+        self.adjust_brackets_for_token_type(token, arena);
+
+        // NodeManager's open_brackets: ONLY actual brackets, not unterm keywords.
+        // This is used by HandleNonreservedTopLevelKeyword to decide if FROM/USING
+        // should be treated as keywords or names.
+        self.open_brackets = self
+            .node_open_brackets
+            .iter()
+            .filter(|&&idx| !arena[idx].is_unterm_keyword())
+            .copied()
+            .collect();
+        self.open_jinja_blocks = self.node_open_jinja.clone();
+
+        (
+            self.node_open_brackets.len() as u16,
+            self.node_open_jinja.len() as u16,
+        )
+    }
+
+    /// If the previous node is an opening bracket, unterm keyword, or jinja block
+    /// opener, push it onto the appropriate running bracket/jinja stack.
+    /// LATERAL is excluded because it's a FROM clause modifier, not a depth-opener.
+    fn push_opener_from_previous_node(&mut self, prev_idx: NodeIndex, arena: &[Node]) {
+        let prev = &arena[prev_idx];
+        if prev.is_unterm_keyword() || prev.is_opening_bracket() {
+            let is_lateral_kw =
+                prev.is_unterm_keyword() && prev.value.eq_ignore_ascii_case("lateral");
+            if !is_lateral_kw {
+                self.node_open_brackets.push(prev_idx);
+            }
+        } else if prev.is_opening_jinja_block() {
+            // Snapshot brackets before pushing jinja block so we can
+            // restore them when the block closes.
+            self.node_open_jinja_bracket_snapshots
+                .push(self.node_open_brackets.clone());
+            self.node_open_jinja.push(prev_idx);
+        }
+    }
+
+    /// Adjust the running bracket and jinja stacks based on the current token type.
+    /// Handles popping brackets for closing tokens, unterm keyword replacement,
+    /// jinja block transitions, and semicolon resets.
+    fn adjust_brackets_for_token_type(&mut self, token: &Token, arena: &[Node]) {
         match token.token_type {
             TokenType::UntermKeyword | TokenType::SetOperator => {
                 // LATERAL should NOT pop the previous keyword — it's a modifier
@@ -147,44 +174,28 @@ impl NodeManager {
                 self.node_open_brackets.pop();
             }
             TokenType::JinjaBlockEnd => {
-                // Pop the jinja block and restore SQL brackets to the state
-                // at the time the jinja block was opened.
-                if self.node_open_jinja.pop().is_some() {
-                    if let Some(snapshot) = self.node_open_jinja_bracket_snapshots.pop() {
-                        self.node_open_brackets = snapshot;
-                    }
-                }
+                self.restore_jinja_bracket_snapshot();
             }
             TokenType::JinjaBlockKeyword => {
                 // {% else %}, {% elif %}, etc. close the previous block section
                 // and open a new one. Restore SQL brackets to the block start's state.
-                if self.node_open_jinja.pop().is_some() {
-                    if let Some(snapshot) = self.node_open_jinja_bracket_snapshots.pop() {
-                        self.node_open_brackets = snapshot;
-                    }
-                }
+                self.restore_jinja_bracket_snapshot();
             }
             TokenType::Semicolon => {
                 self.node_open_brackets.clear();
             }
             _ => {}
         }
+    }
 
-        // NodeManager's open_brackets: ONLY actual brackets, not unterm keywords.
-        // This is used by HandleNonreservedTopLevelKeyword to decide if FROM/USING
-        // should be treated as keywords or names.
-        self.open_brackets = self
-            .node_open_brackets
-            .iter()
-            .filter(|&&idx| !arena[idx].is_unterm_keyword())
-            .copied()
-            .collect();
-        self.open_jinja_blocks = self.node_open_jinja.clone();
-
-        (
-            self.node_open_brackets.len() as u16,
-            self.node_open_jinja.len() as u16,
-        )
+    /// Pop the most recent jinja block and restore SQL brackets to the state
+    /// at the time the jinja block was opened.
+    fn restore_jinja_bracket_snapshot(&mut self) {
+        if self.node_open_jinja.pop().is_some() {
+            if let Some(snapshot) = self.node_open_jinja_bracket_snapshots.pop() {
+                self.node_open_brackets = snapshot;
+            }
+        }
     }
 
     /// Compute formatting_disabled state from previous node.
@@ -219,17 +230,17 @@ impl NodeManager {
     }
 
     /// Open a bracket (called after node is added to arena with its index).
-    pub fn push_bracket(&mut self, node_idx: NodeIndex) {
+    pub(crate) fn push_bracket(&mut self, node_idx: NodeIndex) {
         self.open_brackets.push(node_idx);
     }
 
     /// Open a Jinja block.
-    pub fn push_jinja_block(&mut self, node_idx: NodeIndex) {
+    pub(crate) fn push_jinja_block(&mut self, node_idx: NodeIndex) {
         self.open_jinja_blocks.push(node_idx);
     }
 
     /// Close the most recent Jinja block.
-    pub fn pop_jinja_block(&mut self) {
+    pub(crate) fn pop_jinja_block(&mut self) {
         self.open_jinja_blocks.pop();
     }
 
@@ -275,32 +286,9 @@ impl NodeManager {
 
         if matches!(tt, TokenType::Number | TokenType::Dot | TokenType::Name)
             && prev_type == Some(TokenType::Operator)
+            && Self::is_unary_sign_context(prev, arena)
         {
-            if let Some(prev_node) = prev {
-                if prev_node.value == "+" || prev_node.value == "-" {
-                    let (prev_prev, _) = Self::get_previous_token(prev_node.previous_node, arena);
-                    let is_unary = match prev_prev {
-                        None => true,
-                        Some(pp) => matches!(
-                            pp.token.token_type,
-                            TokenType::Operator
-                                | TokenType::WordOperator
-                                | TokenType::BooleanOperator
-                                | TokenType::UntermKeyword
-                                | TokenType::Comma
-                                | TokenType::BracketOpen
-                                | TokenType::StatementStart
-                                | TokenType::SetOperator
-                                | TokenType::Star
-                                | TokenType::On
-                                | TokenType::DoubleColon
-                        ),
-                    };
-                    if is_unary {
-                        return Cow::Borrowed("");
-                    }
-                }
-            }
+            return Cow::Borrowed("");
         }
 
         // *REPLACE and *EXCLUDE are handled by the star_replace_exclude rule
@@ -379,28 +367,8 @@ impl NodeManager {
                     | Some(TokenType::BracketClose)
             )
         {
-            if prev_type == Some(TokenType::Name) {
-                if let Some(prev_node) = prev {
-                    // Snowflake DDL: before(, at( always need a space
-                    if prev_node.value.eq_ignore_ascii_case("before")
-                        || prev_node.value.eq_ignore_ascii_case("at")
-                    {
-                        return Cow::Borrowed(" ");
-                    }
-                    if prev_node.value.eq_ignore_ascii_case("filter")
-                        || prev_node.value.eq_ignore_ascii_case("offset")
-                    {
-                        let (pp, _) = Self::get_previous_token(prev_node.previous_node, arena);
-                        if let Some(pp_node) = pp {
-                            if matches!(
-                                pp_node.token.token_type,
-                                TokenType::BracketClose | TokenType::StatementEnd
-                            ) {
-                                return Cow::Borrowed(" ");
-                            }
-                        }
-                    }
-                }
+            if Self::bracket_open_needs_space_after_name(prev_type, prev, arena) {
+                return Cow::Borrowed(" ");
             }
             return Cow::Borrowed("");
         }
@@ -534,12 +502,81 @@ impl NodeManager {
         self.formatting_disabled_depth > 0
     }
 
+    /// Check if a `+` or `-` operator is being used as a unary sign based on
+    /// the token that precedes it. Returns true when the sign should be glued
+    /// to the following number/name/dot (no space).
+    fn is_unary_sign_context(prev: Option<&Node>, arena: &[Node]) -> bool {
+        let prev_node = match prev {
+            Some(n) => n,
+            None => return false,
+        };
+        if prev_node.value != "+" && prev_node.value != "-" {
+            return false;
+        }
+        let (prev_prev, _) = Self::get_previous_token(prev_node.previous_node, arena);
+        match prev_prev {
+            None => true,
+            Some(pp) => matches!(
+                pp.token.token_type,
+                TokenType::Operator
+                    | TokenType::WordOperator
+                    | TokenType::BooleanOperator
+                    | TokenType::UntermKeyword
+                    | TokenType::Comma
+                    | TokenType::BracketOpen
+                    | TokenType::StatementStart
+                    | TokenType::SetOperator
+                    | TokenType::Star
+                    | TokenType::On
+                    | TokenType::DoubleColon
+            ),
+        }
+    }
+
+    /// When a BracketOpen follows a Name token, determine whether a space is
+    /// needed between them. Returns true for special names like `before(`,
+    /// `at(`, `filter(`, and `offset(` that are clause keywords rather than
+    /// function calls.
+    fn bracket_open_needs_space_after_name(
+        prev_type: Option<TokenType>,
+        prev: Option<&Node>,
+        arena: &[Node],
+    ) -> bool {
+        if prev_type != Some(TokenType::Name) {
+            return false;
+        }
+        let prev_node = match prev {
+            Some(n) => n,
+            None => return false,
+        };
+        // Snowflake DDL: before(, at( always need a space
+        if prev_node.value.eq_ignore_ascii_case("before")
+            || prev_node.value.eq_ignore_ascii_case("at")
+        {
+            return true;
+        }
+        if prev_node.value.eq_ignore_ascii_case("filter")
+            || prev_node.value.eq_ignore_ascii_case("offset")
+        {
+            let (pp, _) = Self::get_previous_token(prev_node.previous_node, arena);
+            if let Some(pp_node) = pp {
+                if matches!(
+                    pp_node.token.token_type,
+                    TokenType::BracketClose | TokenType::StatementEnd
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Reset state (for new query).
     /// Only clears NodeManager-level state (filtered brackets, jinja blocks used
     /// by handle_* methods). Does NOT clear node_open_brackets/node_open_jinja
     /// because they track the running node-level state and the next
     /// compute_open_brackets will maintain them from the previous arena node.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.open_brackets.clear();
         self.open_jinja_blocks.clear();
         self.formatting_disabled_depth = 0;

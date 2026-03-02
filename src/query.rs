@@ -5,13 +5,14 @@ use crate::node::Node;
 /// and the lines produced by the lexer/formatter.
 #[derive(Debug, Clone)]
 pub struct Query {
-    pub source_string: String,
-    pub line_length: usize,
-    pub lines: Vec<Line>,
+    #[allow(dead_code)]
+    pub(crate) source_string: String,
+    pub(crate) line_length: usize,
+    pub(crate) lines: Vec<Line>,
 }
 
 impl Query {
-    pub fn new(source_string: String, line_length: usize, lines: Vec<Line>) -> Self {
+    pub(crate) fn new(source_string: String, line_length: usize, lines: Vec<Line>) -> Self {
         Self {
             source_string,
             line_length,
@@ -20,7 +21,7 @@ impl Query {
     }
 
     /// Render the full formatted output.
-    pub fn render(&self, arena: &[Node]) -> String {
+    pub(crate) fn render(&self, arena: &[Node]) -> String {
         let mut result = String::new();
         for (i, line) in self.lines.iter().enumerate() {
             // For standalone comment-only lines, use the depth of the next
@@ -61,14 +62,11 @@ impl Query {
     }
 
     /// Collect all tokens from all lines (for equivalence checking).
-    pub fn tokens<'a>(&'a self, arena: &'a [Node]) -> Vec<&'a Node> {
-        let mut nodes = Vec::new();
-        for line in &self.lines {
-            for &idx in &line.nodes {
-                nodes.push(&arena[idx]);
-            }
-        }
-        nodes
+    pub(crate) fn tokens<'a>(&'a self, arena: &'a [Node]) -> Vec<&'a Node> {
+        self.lines
+            .iter()
+            .flat_map(|line| line.nodes.iter().map(|&idx| &arena[idx]))
+            .collect()
     }
 }
 

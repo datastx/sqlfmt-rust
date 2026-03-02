@@ -14,9 +14,9 @@ use crate::token::{Token, TokenType};
 /// The byte-dispatch lexer. Parses SQL source strings into Queries.
 /// Maintains buffers and a lex state stack for nested lexing contexts.
 pub struct Analyzer {
-    pub line_length: usize,
-    pub node_manager: NodeManager,
-    pub arena: Vec<Node>,
+    pub(crate) line_length: usize,
+    pub(crate) node_manager: NodeManager,
+    pub(crate) arena: Vec<Node>,
 
     lex_state: Vec<LexState>,
     node_buffer: Vec<NodeIndex>,
@@ -38,7 +38,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    pub fn new(node_manager: NodeManager, line_length: usize) -> Self {
+    pub(crate) fn new(node_manager: NodeManager, line_length: usize) -> Self {
         Self {
             line_length,
             node_manager,
@@ -120,19 +120,7 @@ impl Analyzer {
     ) -> Result<(), SqlfmtError> {
         match action {
             Action::AddNode { token_type } => {
-                if *token_type == TokenType::Operator
-                    && token_text == ">>"
-                    && self.handle_angle_bracket_splitting(prefix, match_len)
-                {
-                    return Ok(());
-                }
-                self.add_node(prefix, token_text, *token_type);
-                if *token_type == TokenType::FmtOff {
-                    self.push_state(LexState::FmtOff);
-                } else if *token_type == TokenType::FmtOn {
-                    self.pop_state();
-                }
-                self.pos += match_len;
+                self.handle_add_node(prefix, token_text, *token_type, match_len);
             }
 
             Action::SafeAddNode {
@@ -149,29 +137,11 @@ impl Analyzer {
             }
 
             Action::HandleNewline => {
-                if self.suppress_next_newline {
-                    self.suppress_next_newline = false;
-                    self.had_suppressed_newline = true;
-                } else {
-                    // Store trailing whitespace from this newline match
-                    // (prefix captures whitespace between last token and newline)
-                    self.trailing_whitespace.clear();
-                    self.trailing_whitespace.push_str(prefix);
-                    self.flush_line_buffer();
-                    self.trailing_whitespace.clear();
-                }
-                self.pos += match_len;
+                self.handle_newline(prefix, match_len);
             }
 
             Action::HandleSemicolon => {
-                self.add_node(prefix, token_text, TokenType::Semicolon);
-                self.flush_line_buffer();
-                while self.lex_state.len() > 1 {
-                    self.lex_state.pop();
-                }
-                self.node_manager.reset();
-                self.suppress_next_newline = true;
-                self.pos += match_len;
+                self.handle_semicolon(prefix, token_text, match_len);
             }
 
             Action::HandleNumber => {
@@ -180,37 +150,17 @@ impl Analyzer {
             }
 
             Action::HandleReservedKeyword { inner } => {
-                let prev_is_dot = self
-                    .previous_node_index()
-                    .is_some_and(|_idx| self.get_prev_sql_type() == Some(TokenType::Dot));
-                if prev_is_dot {
-                    self.add_node(prefix, token_text, TokenType::Name);
-                    self.pos += match_len;
-                } else {
-                    self.execute_action(inner, match_len, prefix, token_text, _source)?;
-                }
+                self.handle_reserved_keyword(inner, match_len, prefix, token_text, _source)?;
             }
 
             Action::HandleNonreservedTopLevelKeyword { inner } => {
-                if !self.node_manager.open_brackets.is_empty() {
-                    self.add_node(prefix, token_text, TokenType::Name);
-                    self.pos += match_len;
-                } else {
-                    self.execute_action(inner, match_len, prefix, token_text, _source)?;
-                }
+                self.handle_nonreserved_top_level_keyword(
+                    inner, match_len, prefix, token_text, _source,
+                )?;
             }
 
             Action::HandleSetOperator => {
-                // Only flush if there's buffered content; don't create a spurious
-                // blank line when the previous newline already flushed the buffer.
-                if !self.node_buffer.is_empty() || !self.comment_buffer.is_empty() {
-                    self.flush_line_buffer();
-                }
-                self.add_node(prefix, token_text, TokenType::SetOperator);
-                self.flush_line_buffer();
-                self.node_manager.reset();
-                self.suppress_next_newline = true;
-                self.pos += match_len;
+                self.handle_set_operator(prefix, token_text, match_len);
             }
 
             Action::HandleDdlAs => {
@@ -220,27 +170,11 @@ impl Analyzer {
             }
 
             Action::HandleClosingAngleBracket => {
-                let has_open_angle = self
-                    .node_manager
-                    .open_brackets
-                    .last()
-                    .map(|&idx| self.arena[idx].value == "<")
-                    .unwrap_or(false);
-                if has_open_angle {
-                    self.add_node(prefix, token_text, TokenType::BracketClose);
-                    self.node_manager.open_brackets.pop();
-                } else {
-                    self.add_node(prefix, token_text, TokenType::Operator);
-                }
-                self.pos += match_len;
+                self.handle_closing_angle_bracket(prefix, token_text, match_len);
             }
 
             Action::HandleJinjaBlockStart => {
-                self.add_node(prefix, token_text, TokenType::JinjaBlockStart);
-                let last_idx = self.arena.len() - 1;
-                self.node_manager.push_jinja_block(last_idx);
-                self.maybe_push_jinja_data_rules(token_text);
-                self.pos += match_len;
+                self.handle_jinja_block_start(prefix, token_text, match_len);
             }
 
             Action::HandleJinjaBlockKeyword => {
@@ -258,36 +192,11 @@ impl Analyzer {
             }
 
             Action::HandleKeywordBeforeParen { token_type } => {
-                // The matched text includes the trailing `(`, but we only consume the keyword.
-                // Strip trailing `(` and any whitespace before it to get the keyword.
-                let keyword = token_text.trim_end_matches('(').trim_end();
-
-                // For star modifiers (except/exclude/replace): only use WordOperator
-                // when preceded by Star. Otherwise it's a function call → Name.
-                let effective_type = if *token_type == TokenType::WordOperator
-                    && self.get_prev_sql_type() != Some(TokenType::Star)
-                {
-                    TokenType::Name
-                } else {
-                    *token_type
-                };
-
-                self.add_node(prefix, keyword, effective_type);
-                // Only advance past prefix + keyword (leave `(` for bracket_open)
-                self.pos += prefix.len() + keyword.len();
+                self.handle_keyword_before_paren(prefix, token_text, *token_type);
             }
 
             Action::LexRuleset { ruleset_name } => {
-                // Push the alternate lex state and re-lex from the same position.
-                let new_state = match *ruleset_name {
-                    "grant" => LexState::Grant,
-                    "function" => LexState::Function,
-                    "warehouse" => LexState::Warehouse,
-                    "clone" => LexState::Clone,
-                    _ => LexState::Unsupported,
-                };
-                self.push_state(new_state);
-                // Don't advance pos — let the new state re-lex from current position
+                self.handle_lex_ruleset(ruleset_name);
             }
         }
 
@@ -319,6 +228,166 @@ impl Analyzer {
             return true;
         }
         false
+    }
+
+    /// Handle AddNode action: add a node and manage formatting state transitions.
+    fn handle_add_node(
+        &mut self,
+        prefix: &str,
+        token_text: &str,
+        token_type: TokenType,
+        match_len: usize,
+    ) {
+        if token_type == TokenType::Operator
+            && token_text == ">>"
+            && self.handle_angle_bracket_splitting(prefix, match_len)
+        {
+            return;
+        }
+        self.add_node(prefix, token_text, token_type);
+        if token_type == TokenType::FmtOff {
+            self.push_state(LexState::FmtOff);
+        } else if token_type == TokenType::FmtOn {
+            self.pop_state();
+        }
+        self.pos += match_len;
+    }
+
+    /// Handle newline action: flush line buffer or suppress based on state.
+    fn handle_newline(&mut self, prefix: &str, match_len: usize) {
+        if self.suppress_next_newline {
+            self.suppress_next_newline = false;
+            self.had_suppressed_newline = true;
+        } else {
+            self.trailing_whitespace.clear();
+            self.trailing_whitespace.push_str(prefix);
+            self.flush_line_buffer();
+            self.trailing_whitespace.clear();
+        }
+        self.pos += match_len;
+    }
+
+    /// Handle semicolon action: add node, flush, and reset query state.
+    fn handle_semicolon(&mut self, prefix: &str, token_text: &str, match_len: usize) {
+        self.add_node(prefix, token_text, TokenType::Semicolon);
+        self.flush_line_buffer();
+        while self.lex_state.len() > 1 {
+            self.lex_state.pop();
+        }
+        self.node_manager.reset();
+        self.suppress_next_newline = true;
+        self.pos += match_len;
+    }
+
+    /// Handle reserved keyword: use as name if preceded by dot, otherwise delegate.
+    fn handle_reserved_keyword(
+        &mut self,
+        inner: &Action,
+        match_len: usize,
+        prefix: &str,
+        token_text: &str,
+        source: &str,
+    ) -> Result<(), SqlfmtError> {
+        let prev_is_dot = self
+            .previous_node_index()
+            .is_some_and(|_idx| self.get_prev_sql_type() == Some(TokenType::Dot));
+        if prev_is_dot {
+            self.add_node(prefix, token_text, TokenType::Name);
+            self.pos += match_len;
+        } else {
+            self.execute_action(inner, match_len, prefix, token_text, source)?;
+        }
+        Ok(())
+    }
+
+    /// Handle non-reserved top-level keyword: treat as name inside brackets,
+    /// otherwise delegate.
+    fn handle_nonreserved_top_level_keyword(
+        &mut self,
+        inner: &Action,
+        match_len: usize,
+        prefix: &str,
+        token_text: &str,
+        source: &str,
+    ) -> Result<(), SqlfmtError> {
+        if !self.node_manager.open_brackets.is_empty() {
+            self.add_node(prefix, token_text, TokenType::Name);
+            self.pos += match_len;
+        } else {
+            self.execute_action(inner, match_len, prefix, token_text, source)?;
+        }
+        Ok(())
+    }
+
+    /// Handle set operator: flush current line, add operator, flush again.
+    fn handle_set_operator(&mut self, prefix: &str, token_text: &str, match_len: usize) {
+        if !self.node_buffer.is_empty() || !self.comment_buffer.is_empty() {
+            self.flush_line_buffer();
+        }
+        self.add_node(prefix, token_text, TokenType::SetOperator);
+        self.flush_line_buffer();
+        self.node_manager.reset();
+        self.suppress_next_newline = true;
+        self.pos += match_len;
+    }
+
+    /// Handle closing angle bracket: close bracket if matching open exists,
+    /// otherwise treat as operator.
+    fn handle_closing_angle_bracket(&mut self, prefix: &str, token_text: &str, match_len: usize) {
+        let has_open_angle = self
+            .node_manager
+            .open_brackets
+            .last()
+            .map(|&idx| self.arena[idx].value == "<")
+            .unwrap_or(false);
+        if has_open_angle {
+            self.add_node(prefix, token_text, TokenType::BracketClose);
+            self.node_manager.open_brackets.pop();
+        } else {
+            self.add_node(prefix, token_text, TokenType::Operator);
+        }
+        self.pos += match_len;
+    }
+
+    /// Handle Jinja block start: add node and register block.
+    fn handle_jinja_block_start(&mut self, prefix: &str, token_text: &str, match_len: usize) {
+        self.add_node(prefix, token_text, TokenType::JinjaBlockStart);
+        let last_idx = self.arena.len() - 1;
+        self.node_manager.push_jinja_block(last_idx);
+        self.maybe_push_jinja_data_rules(token_text);
+        self.pos += match_len;
+    }
+
+    /// Handle keyword before parenthesis: resolve effective type and add node
+    /// for just the keyword portion (excluding the trailing paren).
+    fn handle_keyword_before_paren(
+        &mut self,
+        prefix: &str,
+        token_text: &str,
+        token_type: TokenType,
+    ) {
+        let keyword = token_text.trim_end_matches('(').trim_end();
+        let effective_type = if token_type == TokenType::WordOperator
+            && self.get_prev_sql_type() != Some(TokenType::Star)
+        {
+            TokenType::Name
+        } else {
+            token_type
+        };
+        self.add_node(prefix, keyword, effective_type);
+        self.pos += prefix.len() + keyword.len();
+    }
+
+    /// Handle lex ruleset: push the appropriate lex state for the named ruleset.
+    fn handle_lex_ruleset(&mut self, ruleset_name: &str) {
+        let new_state = match ruleset_name {
+            "grant" => LexState::Grant,
+            "function" => LexState::Function,
+            "warehouse" => LexState::Warehouse,
+            "clone" => LexState::Clone,
+            _ => LexState::Unsupported,
+        };
+        self.push_state(new_state);
     }
 
     /// Handle SafeAddNode: try primary type, fall back to alt on mismatch.

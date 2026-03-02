@@ -12,18 +12,18 @@ use crate::segment::{build_segments, Segment};
 /// - Operator tier merging: merge runs of operator-separated segments
 /// - Stubborn merging: force-merge tight-binding operators (AS, OVER, etc.)
 /// - Recursive: segments are built, merged, then recursed into
-pub struct LineMerger {
+pub(crate) struct LineMerger {
     max_length: usize,
 }
 
 impl LineMerger {
-    pub fn new(max_length: usize) -> Self {
+    pub(crate) fn new(max_length: usize) -> Self {
         Self { max_length }
     }
 
     /// Main entry: try to merge lines.
     /// Mirrors Python's `maybe_merge_lines`.
-    pub fn maybe_merge_lines(&self, lines: &[Line], arena: &[Node]) -> Vec<Line> {
+    pub(crate) fn maybe_merge_lines(&self, lines: &[Line], arena: &[Node]) -> Vec<Line> {
         if lines.is_empty() || lines.iter().all(|l| l.has_formatting_disabled()) {
             return lines.to_vec();
         }
@@ -168,52 +168,71 @@ impl LineMerger {
             if remove[i] {
                 continue;
             }
-            if lines[i].is_standalone_comma(arena) {
-                // Find next non-blank content line
-                let mut next_content_idx: Option<usize> = None;
-                for j in (i + 1)..len {
-                    if !remove[j]
-                        && !lines[j].is_blank_line(arena)
-                        && !lines[j].is_standalone_comment_line(arena)
-                    {
-                        next_content_idx = Some(j);
-                        break;
-                    }
-                }
-                if let Some(ni) = next_content_idx {
-                    if !is_jinja_block_line(&lines[ni], arena)
-                        && !line_has_interior_split_points(&lines[ni], arena)
-                    {
-                        let to_merge = vec![lines[i].clone(), lines[ni].clone()];
-                        if let Ok(merged) = self.create_merged_line(&to_merge, arena) {
-                            if let Some(merged_line) =
-                                merged.into_iter().find(|l| !l.is_blank_line(arena))
-                            {
-                                lines[ni] = merged_line;
-                                remove[i] = true;
-                                // Remove blank lines between comma and next content
-                                for j in (i + 1)..ni {
-                                    if lines[j].is_blank_line(arena) {
-                                        remove[j] = true;
-                                    }
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
+            if lines[i].is_standalone_comma(arena)
+                && self.try_merge_standalone_comma(i, lines, &mut remove, arena)
+            {
+                continue;
             }
         }
 
         if remove.iter().any(|&r| r) {
-            let mut new_lines = Vec::with_capacity(len);
-            for (i, line) in lines.drain(..).enumerate() {
-                if !remove[i] {
-                    new_lines.push(line);
-                }
-            }
+            let new_lines: Vec<_> = lines
+                .drain(..)
+                .enumerate()
+                .filter(|(i, _)| !remove[*i])
+                .map(|(_, line)| line)
+                .collect();
             *lines = new_lines;
         }
+    }
+
+    /// Try to merge a standalone comma at index `i` with the next content line.
+    /// Returns `true` if the merge succeeded and the caller should `continue`.
+    /// Marks the comma line (and intervening blanks) for removal in `remove`.
+    fn try_merge_standalone_comma(
+        &self,
+        i: usize,
+        lines: &mut [Line],
+        remove: &mut [bool],
+        arena: &[Node],
+    ) -> bool {
+        let len = lines.len();
+        // Find next non-blank content line
+        let ni = match (i + 1..len).find(|&j| {
+            !remove[j]
+                && !lines[j].is_blank_line(arena)
+                && !lines[j].is_standalone_comment_line(arena)
+        }) {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        if is_jinja_block_line(&lines[ni], arena)
+            || line_has_interior_split_points(&lines[ni], arena)
+        {
+            return false;
+        }
+
+        let to_merge = vec![lines[i].clone(), lines[ni].clone()];
+        let merged = match self.create_merged_line(&to_merge, arena) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+
+        let merged_line = match merged.into_iter().find(|l| !l.is_blank_line(arena)) {
+            Some(l) => l,
+            None => return false,
+        };
+
+        lines[ni] = merged_line;
+        remove[i] = true;
+        // Remove blank lines between comma and next content
+        for j in (i + 1)..ni {
+            if lines[j].is_blank_line(arena) {
+                remove[j] = true;
+            }
+        }
+        true
     }
 
     /// Try to merge all lines into a single line.
@@ -747,35 +766,56 @@ impl LineMerger {
             return prev_segments;
         }
 
-        if let Ok((tail_idx, tail_line)) = prev_segment.tail(arena) {
-            let tail_line = tail_line.clone();
-            let mut try_lines = Vec::with_capacity(1 + segment.lines.len());
-            try_lines.push(tail_line.clone());
-            try_lines.extend_from_slice(&segment.lines);
-            if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
-                let tail_start = prev_segment.lines.len() - 1 - tail_idx;
-                let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
-                result_seg.lines.extend(merged);
-                prev_segments.push(result_seg);
-                return prev_segments;
-            }
-
-            let try_lines = [tail_line, head_line];
-            if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
-                let tail_start = prev_segment.lines.len() - 1 - tail_idx;
-                let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
-                result_seg.lines.extend(merged);
-                result_seg
-                    .lines
-                    .extend_from_slice(&segment.lines[head_idx + 1..]);
-                prev_segments.push(result_seg);
-                return prev_segments;
-            }
+        if let Some(result_seg) =
+            self.try_merge_via_prev_tail(&prev_segment, &segment, &head_line, head_idx, arena)
+        {
+            prev_segments.push(result_seg);
+            return prev_segments;
         }
 
         prev_segments.push(prev_segment);
         prev_segments.push(segment);
         prev_segments
+    }
+
+    /// Try merging via the previous segment's tail line.
+    /// Attempt 2: merge tail + all segment lines.
+    /// Attempt 3: merge tail + head line only.
+    /// Returns the merged segment on success, or `None` if both attempts fail.
+    fn try_merge_via_prev_tail(
+        &self,
+        prev_segment: &Segment,
+        segment: &Segment,
+        head_line: &Line,
+        head_idx: usize,
+        arena: &[Node],
+    ) -> Option<Segment> {
+        let (tail_idx, tail_line) = prev_segment.tail(arena).ok()?;
+
+        // Attempt 2: merge tail + all segment lines
+        let mut try_lines = Vec::with_capacity(1 + segment.lines.len());
+        try_lines.push(tail_line.clone());
+        try_lines.extend_from_slice(&segment.lines);
+        if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+            let tail_start = prev_segment.lines.len() - 1 - tail_idx;
+            let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
+            result_seg.lines.extend(merged);
+            return Some(result_seg);
+        }
+
+        // Attempt 3: merge tail + head line only
+        let try_lines = [tail_line.clone(), head_line.clone()];
+        if let Ok(merged) = self.create_merged_line(&try_lines, arena) {
+            let tail_start = prev_segment.lines.len() - 1 - tail_idx;
+            let mut result_seg = Segment::new(prev_segment.lines[..tail_start].to_vec());
+            result_seg.lines.extend(merged);
+            result_seg
+                .lines
+                .extend_from_slice(&segment.lines[head_idx + 1..]);
+            return Some(result_seg);
+        }
+
+        None
     }
 }
 

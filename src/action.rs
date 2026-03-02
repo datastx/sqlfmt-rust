@@ -8,7 +8,7 @@ use crate::token::TokenType;
 /// This eliminates heap allocation for every nested action and removes the need
 /// to clone actions on each token match in the lexer hot path.
 #[derive(Debug)]
-pub enum Action {
+pub(crate) enum Action {
     /// Add a node of the given type to the buffer.
     AddNode { token_type: TokenType },
 

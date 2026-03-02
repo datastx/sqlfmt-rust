@@ -4,30 +4,31 @@ use smallvec::SmallVec;
 use crate::token::{Token, TokenType};
 
 /// Index into the node arena (Vec<Node>).
-pub type NodeIndex = usize;
+pub(crate) type NodeIndex = usize;
 
 /// SmallVec type aliases used by NodeManager for internal bracket tracking.
-pub type BracketVec = SmallVec<[NodeIndex; 8]>;
-pub type JinjaBlockVec = SmallVec<[NodeIndex; 4]>;
+pub(crate) type BracketVec = SmallVec<[NodeIndex; 8]>;
+pub(crate) type JinjaBlockVec = SmallVec<[NodeIndex; 4]>;
 
 /// A Node wraps a Token with formatting metadata: depth, open brackets,
 /// open Jinja blocks, and a link to the previous node.
 #[derive(Debug, Clone)]
-pub struct Node {
-    pub token: Token,
-    pub previous_node: Option<NodeIndex>,
-    pub prefix: CompactString,
-    pub value: CompactString,
+pub(crate) struct Node {
+    pub(crate) token: Token,
+    pub(crate) previous_node: Option<NodeIndex>,
+    pub(crate) prefix: CompactString,
+    pub(crate) value: CompactString,
     /// SQL bracket depth (number of open brackets + unterm keywords).
-    pub bracket_depth: u16,
+    pub(crate) bracket_depth: u16,
     /// Jinja block nesting depth.
-    pub jinja_depth: u16,
+    pub(crate) jinja_depth: u16,
     /// Whether formatting is disabled (fmt:off region).
-    pub formatting_disabled: bool,
+    pub(crate) formatting_disabled: bool,
 }
 
+#[allow(dead_code)]
 impl Node {
-    pub fn new(
+    pub(crate) fn new(
         token: Token,
         previous_node: Option<NodeIndex>,
         prefix: CompactString,
@@ -47,12 +48,12 @@ impl Node {
     }
 
     /// Depth is (sql_bracket_depth, jinja_block_depth).
-    pub fn depth(&self) -> (usize, usize) {
+    pub(crate) fn depth(&self) -> (usize, usize) {
         (self.bracket_depth as usize, self.jinja_depth as usize)
     }
 
     /// Formatted string: prefix + value.
-    pub fn to_formatted_string(&self) -> String {
+    pub(crate) fn to_formatted_string(&self) -> String {
         let mut s = String::with_capacity(self.prefix.len() + self.value.len());
         s.push_str(&self.prefix);
         s.push_str(&self.value);
@@ -62,113 +63,113 @@ impl Node {
     /// Push formatted string (prefix + value) directly into the given buffer.
     /// Avoids allocating a temporary String.
     #[inline]
-    pub fn push_formatted_to(&self, buf: &mut String) {
+    pub(crate) fn push_formatted_to(&self, buf: &mut String) {
         buf.push_str(&self.prefix);
         buf.push_str(&self.value);
     }
 
     /// Character length of the formatted string.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.prefix.len() + self.value.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     // --- Token type classification ---
 
-    pub fn is_unterm_keyword(&self) -> bool {
+    pub(crate) fn is_unterm_keyword(&self) -> bool {
         self.token.token_type == TokenType::UntermKeyword
     }
 
-    pub fn is_comma(&self) -> bool {
+    pub(crate) fn is_comma(&self) -> bool {
         self.token.token_type == TokenType::Comma
     }
 
-    pub fn is_opening_bracket(&self) -> bool {
+    pub(crate) fn is_opening_bracket(&self) -> bool {
         self.token.token_type.is_opening_bracket()
     }
 
-    pub fn is_closing_bracket(&self) -> bool {
+    pub(crate) fn is_closing_bracket(&self) -> bool {
         self.token.token_type.is_closing_bracket()
     }
 
-    pub fn is_opening_jinja_block(&self) -> bool {
+    pub(crate) fn is_opening_jinja_block(&self) -> bool {
         matches!(
             self.token.token_type,
             TokenType::JinjaBlockStart | TokenType::JinjaBlockKeyword
         )
     }
 
-    pub fn is_closing_jinja_block(&self) -> bool {
+    pub(crate) fn is_closing_jinja_block(&self) -> bool {
         self.token.token_type == TokenType::JinjaBlockEnd
     }
 
-    pub fn is_jinja(&self) -> bool {
+    pub(crate) fn is_jinja(&self) -> bool {
         self.token.token_type.is_jinja()
     }
 
-    pub fn is_jinja_statement(&self) -> bool {
+    pub(crate) fn is_jinja_statement(&self) -> bool {
         self.token.token_type.is_jinja_statement()
     }
 
-    pub fn is_boolean_operator(&self) -> bool {
+    pub(crate) fn is_boolean_operator(&self) -> bool {
         self.token.token_type == TokenType::BooleanOperator
     }
 
-    pub fn is_newline(&self) -> bool {
+    pub(crate) fn is_newline(&self) -> bool {
         self.token.token_type == TokenType::Newline
     }
 
-    pub fn is_multiline_jinja(&self) -> bool {
+    pub(crate) fn is_multiline_jinja(&self) -> bool {
         self.token.token_type.is_jinja() && self.value.contains('\n')
     }
 
-    pub fn divides_queries(&self) -> bool {
+    pub(crate) fn divides_queries(&self) -> bool {
         self.token.token_type.divides_queries()
     }
 
-    pub fn is_set_operator(&self) -> bool {
+    pub(crate) fn is_set_operator(&self) -> bool {
         self.token.token_type == TokenType::SetOperator
     }
 
-    pub fn is_semicolon(&self) -> bool {
+    pub(crate) fn is_semicolon(&self) -> bool {
         self.token.token_type == TokenType::Semicolon
     }
 
-    pub fn is_star(&self) -> bool {
+    pub(crate) fn is_star(&self) -> bool {
         self.token.token_type == TokenType::Star
     }
 
-    pub fn is_name(&self) -> bool {
+    pub(crate) fn is_name(&self) -> bool {
         self.token.token_type == TokenType::Name
     }
 
-    pub fn is_quoted_name(&self) -> bool {
+    pub(crate) fn is_quoted_name(&self) -> bool {
         self.token.token_type == TokenType::QuotedName
     }
 
-    pub fn is_dot(&self) -> bool {
+    pub(crate) fn is_dot(&self) -> bool {
         self.token.token_type == TokenType::Dot
     }
 
-    pub fn is_comment(&self) -> bool {
+    pub(crate) fn is_comment(&self) -> bool {
         self.token.token_type == TokenType::Comment
     }
 
-    pub fn is_fmt_off(&self) -> bool {
+    pub(crate) fn is_fmt_off(&self) -> bool {
         self.token.token_type == TokenType::FmtOff
     }
 
-    pub fn is_fmt_on(&self) -> bool {
+    pub(crate) fn is_fmt_on(&self) -> bool {
         self.token.token_type == TokenType::FmtOn
     }
 
     // --- Context-dependent classification ---
 
     /// True if this STAR token acts as multiplication (not SELECT *).
-    pub fn is_multiplication_star(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_multiplication_star(&self, arena: &[Node]) -> bool {
         if self.token.token_type != TokenType::Star {
             return false;
         }
@@ -186,7 +187,7 @@ impl Node {
     }
 
     /// True if this bracket acts as an operator (e.g., array indexing with `[`).
-    pub fn is_bracket_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_bracket_operator(&self, arena: &[Node]) -> bool {
         if self.token.token_type != TokenType::BracketOpen {
             return false;
         }
@@ -208,7 +209,7 @@ impl Node {
     }
 
     /// True if this node acts as an operator in context.
-    pub fn is_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_operator(&self, arena: &[Node]) -> bool {
         self.token.token_type.is_always_operator()
             || self.is_multiplication_star(arena)
             || self.is_bracket_operator(arena)
@@ -216,7 +217,7 @@ impl Node {
 
     /// Walk backward through previous_node links, skipping NEWLINE and
     /// JINJA_STATEMENT, to find the previous "meaningful" SQL token.
-    pub fn get_previous_sql_token<'a>(&self, arena: &'a [Node]) -> Option<&'a Token> {
+    pub(crate) fn get_previous_sql_token<'a>(&self, arena: &'a [Node]) -> Option<&'a Token> {
         let mut idx = self.previous_node;
         while let Some(i) = idx {
             let node = &arena[i];
@@ -230,7 +231,7 @@ impl Node {
     }
 
     /// Checks for a preceding BETWEEN operator at the same depth (for AND disambiguation).
-    pub fn has_preceding_between_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn has_preceding_between_operator(&self, arena: &[Node]) -> bool {
         let my_depth = self.depth();
         let mut idx = self.previous_node;
         while let Some(i) = idx {
@@ -254,7 +255,7 @@ impl Node {
     }
 
     /// True if this is the AND that follows a BETWEEN (i.e., BETWEEN x AND y).
-    pub fn is_the_and_after_between(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_the_and_after_between(&self, arena: &[Node]) -> bool {
         self.is_boolean_operator()
             && self.value.eq_ignore_ascii_case("and")
             && self.has_preceding_between_operator(arena)

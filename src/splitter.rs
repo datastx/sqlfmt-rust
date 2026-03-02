@@ -13,10 +13,10 @@ use crate::token::{Token, TokenType};
 /// - Splits AFTER opening brackets, keywords, query dividers
 /// - Splits BEFORE commas, operators, keywords, closing brackets, multiline jinja
 /// - Uses iterative (not recursive) approach to handle very long lines
-pub struct LineSplitter;
+pub(crate) struct LineSplitter;
 
 impl LineSplitter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
@@ -24,7 +24,7 @@ impl LineSplitter {
     /// This always splits — it does not check line length first.
     /// The Python splitter also always splits (length checking is done by the merger).
     /// Takes ownership of the line to avoid cloning in common paths.
-    pub fn maybe_split(&self, mut line: Line, arena: &mut Vec<Node>) -> Vec<Line> {
+    pub(crate) fn maybe_split(&self, mut line: Line, arena: &mut Vec<Node>) -> Vec<Line> {
         if line.has_formatting_disabled() {
             return vec![line];
         }

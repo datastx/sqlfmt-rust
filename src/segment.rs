@@ -5,12 +5,12 @@ use crate::node::Node;
 /// A Segment is a group of consecutive Lines used by the merger.
 /// Lines in the same segment share the same base indentation level.
 #[derive(Debug, Clone)]
-pub struct Segment {
-    pub lines: Vec<Line>,
+pub(crate) struct Segment {
+    pub(crate) lines: Vec<Line>,
 }
 
 impl Segment {
-    pub fn new(lines: Vec<Line>) -> Self {
+    pub(crate) fn new(lines: Vec<Line>) -> Self {
         Self { lines }
     }
 
@@ -25,7 +25,7 @@ impl Segment {
     }
 
     /// First non-blank line and its index.
-    pub fn head(&self, arena: &[Node]) -> Result<(usize, &Line), SqlfmtError> {
+    pub(crate) fn head(&self, arena: &[Node]) -> Result<(usize, &Line), SqlfmtError> {
         for (i, line) in self.lines.iter().enumerate() {
             if !line.is_blank_line(arena) {
                 return Ok((i, line));
@@ -37,7 +37,7 @@ impl Segment {
     }
 
     /// Last non-blank line and its index (from the bottom).
-    pub fn tail(&self, arena: &[Node]) -> Result<(usize, &Line), SqlfmtError> {
+    pub(crate) fn tail(&self, arena: &[Node]) -> Result<(usize, &Line), SqlfmtError> {
         for (i, line) in self.lines.iter().enumerate().rev() {
             if !line.is_blank_line(arena) {
                 let from_bottom = self.lines.len() - 1 - i;
@@ -51,7 +51,7 @@ impl Segment {
 
     /// True if the tail line closes a bracket or simple jinja block
     /// opened by the head line.
-    pub fn tail_closes_head(&self, arena: &[Node]) -> bool {
+    pub(crate) fn tail_closes_head(&self, arena: &[Node]) -> bool {
         if self.lines.len() <= 1 {
             return false;
         }
@@ -122,7 +122,7 @@ impl Segment {
 /// Build segments from a flat list of lines.
 /// Mirrors Python's `create_segments_from_lines`:
 /// A segment is a list of consecutive lines that are indented from the first line.
-pub fn build_segments(lines: &[Line], arena: &[Node]) -> Vec<Segment> {
+pub(crate) fn build_segments(lines: &[Line], arena: &[Node]) -> Vec<Segment> {
     if lines.is_empty() {
         return Vec::new();
     }

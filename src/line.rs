@@ -20,7 +20,7 @@ static INDENT_CACHE: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
 
 /// Return a cached `&'static str` of `n` spaces. Avoids allocation for n <= 200.
 /// For n > 200, leaks a one-off string (should essentially never happen).
-pub fn indent_str(n: usize) -> &'static str {
+pub(crate) fn indent_str(n: usize) -> &'static str {
     if n <= 200 {
         INDENT_CACHE[n]
     } else {
@@ -31,15 +31,16 @@ pub fn indent_str(n: usize) -> &'static str {
 /// A Line is a collection of Nodes intended to be printed on one line,
 /// plus any attached comments.
 #[derive(Debug, Clone)]
-pub struct Line {
-    pub previous_node: Option<NodeIndex>,
-    pub nodes: Vec<NodeIndex>,
-    pub comments: Vec<Comment>,
-    pub formatting_disabled: bool,
+pub(crate) struct Line {
+    pub(crate) previous_node: Option<NodeIndex>,
+    pub(crate) nodes: Vec<NodeIndex>,
+    pub(crate) comments: Vec<Comment>,
+    pub(crate) formatting_disabled: bool,
 }
 
+#[allow(dead_code)]
 impl Line {
-    pub fn new(previous_node: Option<NodeIndex>) -> Self {
+    pub(crate) fn new(previous_node: Option<NodeIndex>) -> Self {
         Self {
             previous_node,
             nodes: Vec::with_capacity(4),
@@ -48,12 +49,12 @@ impl Line {
         }
     }
 
-    pub fn is_blank_line(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_blank_line(&self, arena: &[Node]) -> bool {
         self.nodes.len() == 1 && arena[self.nodes[0]].is_newline() && self.comments.is_empty()
     }
 
     /// True if this line consists only of standalone comments (no SQL content).
-    pub fn is_standalone_comment_line(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_standalone_comment_line(&self, arena: &[Node]) -> bool {
         self.nodes.len() == 1
             && arena[self.nodes[0]].is_newline()
             && !self.comments.is_empty()
@@ -61,7 +62,7 @@ impl Line {
     }
 
     /// Depth of the first non-newline node.
-    pub fn depth(&self, arena: &[Node]) -> (usize, usize) {
+    pub(crate) fn depth(&self, arena: &[Node]) -> (usize, usize) {
         for &idx in &self.nodes {
             if !arena[idx].is_newline() {
                 return arena[idx].depth();
@@ -73,18 +74,18 @@ impl Line {
     }
 
     /// Number of spaces for indentation: 4 per SQL depth + 4 per Jinja depth.
-    pub fn indent_size(&self, arena: &[Node]) -> usize {
+    pub(crate) fn indent_size(&self, arena: &[Node]) -> usize {
         let (sql, jinja) = self.depth(arena);
         4 * (sql + jinja)
     }
 
     /// Indentation prefix string. Returns a cached `&str` for common sizes.
-    pub fn indentation<'a>(&self, arena: &[Node]) -> &'a str {
+    pub(crate) fn indentation<'a>(&self, arena: &[Node]) -> &'a str {
         indent_str(self.indent_size(arena))
     }
 
     /// Render the line to a string (nodes only, no standalone comments).
-    pub fn render(&self, arena: &[Node]) -> String {
+    pub(crate) fn render(&self, arena: &[Node]) -> String {
         if self.is_blank_line(arena) {
             return "\n".to_string();
         }
@@ -134,7 +135,7 @@ impl Line {
     /// Render with comments, respecting max_line_length.
     /// If `indent_override` is provided, use it for standalone comment indentation
     /// instead of the line's own depth-based indentation.
-    pub fn render_with_comments(
+    pub(crate) fn render_with_comments(
         &self,
         arena: &[Node],
         max_line_length: usize,
@@ -180,7 +181,7 @@ impl Line {
 
     /// Length of the rendered line (longest sub-line if multiline Jinja).
     /// Computed arithmetically for the common case to avoid allocating a String.
-    pub fn len(&self, arena: &[Node]) -> usize {
+    pub(crate) fn len(&self, arena: &[Node]) -> usize {
         if self.is_blank_line(arena) {
             return 1;
         }
@@ -226,7 +227,7 @@ impl Line {
     }
 
     /// Length including inline comments (for merger length checks).
-    pub fn len_with_comments(&self, arena: &[Node]) -> usize {
+    pub(crate) fn len_with_comments(&self, arena: &[Node]) -> usize {
         let base = self.len(arena);
         let inline_len: usize = self
             .comments
@@ -238,12 +239,12 @@ impl Line {
     }
 
     /// True if the line has no nodes.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
     /// Get the first non-newline node.
-    pub fn first_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+    pub(crate) fn first_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
         self.nodes
             .iter()
             .map(|&i| &arena[i])
@@ -251,7 +252,7 @@ impl Line {
     }
 
     /// Get the second non-newline node (useful for leading-comma lines like `, lateral`).
-    pub fn second_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+    pub(crate) fn second_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
         self.nodes
             .iter()
             .map(|&i| &arena[i])
@@ -260,12 +261,12 @@ impl Line {
     }
 
     /// Get the index of the first non-newline node.
-    pub fn first_content_node_idx(&self, arena: &[Node]) -> Option<NodeIndex> {
+    pub(crate) fn first_content_node_idx(&self, arena: &[Node]) -> Option<NodeIndex> {
         self.nodes.iter().copied().find(|&i| !arena[i].is_newline())
     }
 
     /// Get the last non-newline node.
-    pub fn last_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
+    pub(crate) fn last_content_node<'a>(&self, arena: &'a [Node]) -> Option<&'a Node> {
         self.nodes
             .iter()
             .rev()
@@ -273,80 +274,80 @@ impl Line {
             .find(|n| !n.is_newline())
     }
 
-    pub fn starts_with_comma(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_comma(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_comma())
             .unwrap_or(false)
     }
 
-    pub fn starts_with_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_operator(arena))
             .unwrap_or(false)
     }
 
-    pub fn starts_with_unterm_keyword(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_unterm_keyword(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_unterm_keyword())
             .unwrap_or(false)
     }
 
-    pub fn starts_with_boolean_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_boolean_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_boolean_operator())
             .unwrap_or(false)
     }
 
-    pub fn starts_with_set_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_set_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_set_operator())
             .unwrap_or(false)
     }
 
-    pub fn starts_with_semicolon(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_semicolon(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_semicolon())
             .unwrap_or(false)
     }
 
-    pub fn starts_with_opening_bracket(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_opening_bracket(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_opening_bracket())
             .unwrap_or(false)
     }
 
-    pub fn closes_bracket_from_previous_line(&self, arena: &[Node]) -> bool {
+    pub(crate) fn closes_bracket_from_previous_line(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_closing_bracket())
             .unwrap_or(false)
     }
 
-    pub fn contains_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn contains_operator(&self, arena: &[Node]) -> bool {
         self.nodes.iter().any(|&i| arena[i].is_operator(arena))
     }
 
-    pub fn contains_jinja(&self, arena: &[Node]) -> bool {
+    pub(crate) fn contains_jinja(&self, arena: &[Node]) -> bool {
         self.nodes.iter().any(|&i| arena[i].is_jinja())
     }
 
-    pub fn contains_multiline_jinja(&self, arena: &[Node]) -> bool {
+    pub(crate) fn contains_multiline_jinja(&self, arena: &[Node]) -> bool {
         self.nodes.iter().any(|&i| arena[i].is_multiline_jinja())
     }
 
-    pub fn ends_with_comma(&self, arena: &[Node]) -> bool {
+    pub(crate) fn ends_with_comma(&self, arena: &[Node]) -> bool {
         self.last_content_node(arena)
             .map(|n| n.is_comma())
             .unwrap_or(false)
     }
 
-    pub fn ends_with_opening_bracket(&self, arena: &[Node]) -> bool {
+    pub(crate) fn ends_with_opening_bracket(&self, arena: &[Node]) -> bool {
         self.last_content_node(arena)
             .map(|n| n.is_opening_bracket())
             .unwrap_or(false)
     }
 
     /// True if this line has only one non-newline content node.
-    pub fn is_standalone_content(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_standalone_content(&self, arena: &[Node]) -> bool {
         let content_count = self
             .nodes
             .iter()
@@ -356,26 +357,26 @@ impl Line {
     }
 
     /// True if this line is a standalone operator (single operator + optional newline).
-    pub fn is_standalone_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_standalone_operator(&self, arena: &[Node]) -> bool {
         self.starts_with_operator(arena)
             && !self.starts_with_bracket_operator(arena)
             && self.is_standalone_content(arena)
     }
 
     /// True if this line is a standalone comma.
-    pub fn is_standalone_comma(&self, arena: &[Node]) -> bool {
+    pub(crate) fn is_standalone_comma(&self, arena: &[Node]) -> bool {
         self.starts_with_comma(arena) && self.is_standalone_content(arena)
     }
 
     /// True if first node is a bracket operator.
-    pub fn starts_with_bracket_operator(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_with_bracket_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_bracket_operator(arena))
             .unwrap_or(false)
     }
 
     /// Check if the token preceding this line (via previous_node) is a comma.
-    pub fn previous_token_is_comma(&self, arena: &[Node]) -> bool {
+    pub(crate) fn previous_token_is_comma(&self, arena: &[Node]) -> bool {
         if let Some(prev_idx) = self.previous_node {
             let mut idx = Some(prev_idx);
             while let Some(i) = idx {
@@ -391,7 +392,7 @@ impl Line {
     }
 
     /// True if this closes a simple jinja block from a previous line.
-    pub fn closes_simple_jinja_block(&self, arena: &[Node]) -> bool {
+    pub(crate) fn closes_simple_jinja_block(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
             .map(|n| n.is_closing_jinja_block())
             .unwrap_or(false)
@@ -399,7 +400,7 @@ impl Line {
 
     /// True if this line marks the start of a new segment relative to prev_segment_depth.
     /// Mirrors Python's `starts_new_segment(prev_segment_depth)`.
-    pub fn starts_new_segment_at_depth(
+    pub(crate) fn starts_new_segment_at_depth(
         &self,
         prev_segment_depth: (usize, usize),
         arena: &[Node],
@@ -434,7 +435,7 @@ impl Line {
     }
 
     /// True if this line marks the start of a new segment (simple version).
-    pub fn starts_new_segment(&self, arena: &[Node]) -> bool {
+    pub(crate) fn starts_new_segment(&self, arena: &[Node]) -> bool {
         if self.is_blank_line(arena) {
             return self.depth(arena) == (0, 0);
         }
@@ -445,17 +446,17 @@ impl Line {
     }
 
     /// True if formatting is disabled for this line.
-    pub fn has_formatting_disabled(&self) -> bool {
+    pub(crate) fn has_formatting_disabled(&self) -> bool {
         self.formatting_disabled
     }
 
     /// Append a node index to this line.
-    pub fn append_node(&mut self, node_idx: NodeIndex) {
+    pub(crate) fn append_node(&mut self, node_idx: NodeIndex) {
         self.nodes.push(node_idx);
     }
 
     /// Append a comment to this line.
-    pub fn append_comment(&mut self, comment: Comment) {
+    pub(crate) fn append_comment(&mut self, comment: Comment) {
         self.comments.push(comment);
     }
 }
