@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use crate::comment::Comment;
@@ -34,7 +35,7 @@ pub(crate) fn indent_str(n: usize) -> &'static str {
 pub(crate) struct Line {
     pub(crate) previous_node: Option<NodeIndex>,
     pub(crate) nodes: Vec<NodeIndex>,
-    pub(crate) comments: Vec<Comment>,
+    pub(crate) comments: Rc<Vec<Comment>>,
     pub(crate) formatting_disabled: bool,
 }
 
@@ -43,7 +44,7 @@ impl Line {
         Self {
             previous_node,
             nodes: Vec::with_capacity(4),
-            comments: Vec::new(),
+            comments: Rc::new(Vec::new()),
             formatting_disabled: false,
         }
     }
@@ -150,7 +151,7 @@ impl Line {
 
         // A multiline comment that is not standalone (e.g., /* ... */ appearing mid-line)
         // must still be rendered as standalone to avoid being silently dropped.
-        for comment in &self.comments {
+        for comment in self.comments.iter() {
             if comment.is_standalone || comment.is_multiline() {
                 result.push_str(&comment.render_standalone(prefix, max_line_length));
             }
@@ -380,7 +381,7 @@ impl Line {
 
     /// Append a comment to this line.
     pub(crate) fn append_comment(&mut self, comment: Comment) {
-        self.comments.push(comment);
+        Rc::make_mut(&mut self.comments).push(comment);
     }
 }
 

@@ -116,24 +116,6 @@ fn main() {
         single_process: cli.single_process,
     };
 
-    // Build the tokio runtime, capping both async workers and blocking threads.
-    let num_threads = if mode.threads > 0 {
-        mode.threads
-    } else {
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-    };
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
-    builder.enable_all();
-    builder.worker_threads(num_threads);
-    builder.max_blocking_threads(num_threads);
-    let runtime = builder.build().expect("failed to build tokio runtime");
-
-    runtime.block_on(async_main(cli.files, mode, is_stdin));
-}
-
-async fn async_main(files: Vec<PathBuf>, mode: Mode, is_stdin: bool) {
     if is_stdin {
         let mut source = String::new();
         if let Err(e) = io::stdin().read_to_string(&mut source) {
@@ -151,7 +133,7 @@ async fn async_main(files: Vec<PathBuf>, mode: Mode, is_stdin: bool) {
             }
         }
     } else {
-        let report = sqlfmt::run(&files, &mode).await;
+        let report = sqlfmt::run(&cli.files, &mode);
 
         if !mode.quiet {
             print_verbose_results(&report, &mode);

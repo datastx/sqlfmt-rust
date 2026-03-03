@@ -30,7 +30,7 @@ fn test_no_merge_single_line() {
     let mut arena = Vec::new();
     let line = make_simple_line(&mut arena, TokenType::Name, "a");
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[line], &arena);
+    let result = merger.maybe_merge_lines(vec![line], &arena);
     assert_eq!(result.len(), 1);
 }
 
@@ -41,7 +41,7 @@ fn test_merge_short_lines() {
     let line2 = make_simple_line(&mut arena, TokenType::Name, "b");
 
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[line1, line2], &arena);
+    let result = merger.maybe_merge_lines(vec![line1, line2], &arena);
     // Should merge
     assert!(result.len() <= 2);
 }
@@ -54,7 +54,7 @@ fn test_no_merge_long_result() {
     let line2 = make_simple_line(&mut arena, TokenType::Name, &long_val);
 
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[line1, line2], &arena);
+    let result = merger.maybe_merge_lines(vec![line1, line2], &arena);
     // Should NOT merge since combined length > 88
     assert!(
         result.len() >= 2,
@@ -66,7 +66,7 @@ fn test_no_merge_long_result() {
 fn test_merge_empty_input() {
     let arena = Vec::new();
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[], &arena);
+    let result = merger.maybe_merge_lines(vec![], &arena);
     assert!(result.is_empty());
 }
 
@@ -85,7 +85,7 @@ fn test_no_merge_across_query_dividers() {
     let line3 = make_simple_line(&mut arena, TokenType::Name, "b");
 
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[line1, semi_line, line3], &arena);
+    let result = merger.maybe_merge_lines(vec![line1, semi_line, line3], &arena);
     // Should not merge across the semicolon
     assert!(
         result.len() >= 2,
@@ -108,7 +108,7 @@ fn test_no_merge_formatting_disabled() {
     disabled_line.formatting_disabled = true;
 
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[disabled_line], &arena);
+    let result = merger.maybe_merge_lines(vec![disabled_line], &arena);
     assert_eq!(result.len(), 1);
 }
 
@@ -125,7 +125,7 @@ fn test_merge_with_blank_lines() {
     let line3 = make_simple_line(&mut arena, TokenType::Name, "b");
 
     let merger = LineMerger::new(88);
-    let result = merger.maybe_merge_lines(&[line1, blank, line3], &arena);
+    let result = merger.maybe_merge_lines(vec![line1, blank, line3], &arena);
     // Should produce at least 1 line and not crash
     assert!(
         !result.is_empty(),

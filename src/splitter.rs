@@ -30,7 +30,8 @@ impl LineSplitter {
         }
 
         let mut new_lines: Vec<Line> = Vec::new();
-        let mut comments = std::mem::take(&mut line.comments);
+        let rc_comments = std::mem::take(&mut line.comments);
+        let mut comments = std::rc::Rc::try_unwrap(rc_comments).unwrap_or_else(|rc| (*rc).clone());
         let mut head: usize = 0;
         let mut always_split_after = false;
         let mut never_split_after = false;
@@ -41,7 +42,7 @@ impl LineSplitter {
 
             if node.is_newline() {
                 if head == 0 {
-                    line.comments = comments;
+                    line.comments = std::rc::Rc::new(comments);
                     new_lines.push(line);
                 } else {
                     let (new_line, _remaining_comments) =
@@ -273,7 +274,7 @@ impl LineSplitter {
         for &idx in &new_nodes {
             new_line.append_node(idx);
         }
-        new_line.comments = head_comments;
+        new_line.comments = std::rc::Rc::new(head_comments);
 
         if let Some(&last_node) = new_nodes.last() {
             if !arena[last_node].is_newline() {
