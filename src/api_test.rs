@@ -125,10 +125,10 @@ fn test_get_matching_paths_excludes() {
     assert_eq!(paths.len(), 1);
 }
 
-#[tokio::test]
-async fn test_run_empty_files() {
+#[test]
+fn test_run_empty_files() {
     let mode = Mode::default();
-    let report = run(&[], &mode).await;
+    let report = run(&[], &mode);
     assert_eq!(report.total(), 0);
     assert!(!report.has_errors());
     assert!(!report.has_changes());

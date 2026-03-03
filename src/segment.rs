@@ -122,18 +122,17 @@ impl Segment {
 /// Build segments from a flat list of lines.
 /// Mirrors Python's `create_segments_from_lines`:
 /// A segment is a list of consecutive lines that are indented from the first line.
-pub(crate) fn build_segments(lines: &[Line], arena: &[Node]) -> Vec<Segment> {
+/// Takes ownership of lines and uses drain() to avoid cloning.
+pub(crate) fn build_segments(mut lines: Vec<Line>, arena: &[Node]) -> Vec<Segment> {
     if lines.is_empty() {
         return Vec::new();
     }
 
-    let mut segments: Vec<Segment> = Vec::new();
+    // Pass 1: compute split indices (read-only scan)
+    let mut split_points = Vec::new();
     let mut j = 0;
-
     while j < lines.len() {
         let target_depth = lines[j].depth(arena);
-
-        // Determine start index for scanning
         let start_idx = if lines[j].is_standalone_operator(arena) {
             j + 2
         } else {
@@ -143,19 +142,26 @@ pub(crate) fn build_segments(lines: &[Line], arena: &[Node]) -> Vec<Segment> {
         let mut found = false;
         for i in start_idx..lines.len() {
             if lines[i].starts_new_segment_at_depth(target_depth, arena) {
-                segments.push(Segment::new(lines[j..i].to_vec()));
+                split_points.push(i);
                 j = i;
                 found = true;
                 break;
             }
         }
-
         if !found {
-            segments.push(Segment::new(lines[j..].to_vec()));
             break;
         }
     }
 
+    // Pass 2: drain ranges from back to front (avoids index shifting)
+    let mut segments = Vec::with_capacity(split_points.len() + 1);
+    for &split in split_points.iter().rev() {
+        let tail: Vec<Line> = lines.drain(split..).collect();
+        segments.push(Segment::new(tail));
+    }
+    // Remaining lines form the first segment
+    segments.push(Segment::new(lines));
+    segments.reverse();
     segments
 }
 

@@ -64,7 +64,7 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
 }
 
 /// Run the formatter on a collection of files.
-pub async fn run(files: &[PathBuf], mode: &Mode) -> Report {
+pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
     let matching_paths = get_matching_paths(files, mode);
     let mut report = Report::new();
 
@@ -74,7 +74,8 @@ pub async fn run(files: &[PathBuf], mode: &Mode) -> Report {
             report.add(result);
         }
     } else {
-        // Limit concurrency to the configured thread count (or num_cpus).
+        use rayon::prelude::*;
+
         let concurrency = if mode.threads > 0 {
             mode.threads
         } else {
@@ -82,101 +83,22 @@ pub async fn run(files: &[PathBuf], mode: &Mode) -> Report {
                 .map(|n| n.get())
                 .unwrap_or(4)
         };
-        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
-
-        let mut handles = Vec::with_capacity(matching_paths.len());
-        for path in matching_paths {
-            let mode = mode.clone();
-            let sem = semaphore.clone();
-            handles.push(tokio::spawn(async move {
-                let _permit = sem.acquire().await.expect("semaphore closed");
-                format_file_async(&path, &mode).await
-            }));
-        }
-        for handle in handles {
-            match handle.await {
-                Ok(result) => report.add(result),
-                Err(e) => report.add(FileResult {
-                    path: PathBuf::from("<unknown>"),
-                    status: crate::report::FileStatus::Error,
-                    error: Some(format!("Task join error: {}", e)),
-                }),
-            }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(concurrency)
+            .build()
+            .expect("failed to build rayon thread pool");
+        let results: Vec<FileResult> = pool.install(|| {
+            matching_paths
+                .par_iter()
+                .map(|path| format_file(path, mode))
+                .collect()
+        });
+        for result in results {
+            report.add(result);
         }
     }
 
     report
-}
-
-/// Format a single file asynchronously.
-/// Uses async I/O for reading/writing and spawn_blocking for CPU-bound formatting.
-async fn format_file_async(path: &Path, mode: &Mode) -> FileResult {
-    let source = match tokio::fs::read_to_string(path).await {
-        Ok(s) => s,
-        Err(e) => {
-            return FileResult {
-                path: path.to_path_buf(),
-                status: crate::report::FileStatus::Error,
-                error: Some(format!("Read error: {}", e)),
-            };
-        }
-    };
-
-    let mode_clone = mode.clone();
-    let (source, formatted) = match tokio::task::spawn_blocking(move || {
-        let result = format_string(&source, &mode_clone);
-        (source, result)
-    })
-    .await
-    {
-        Ok((source, Ok(f))) => (source, f),
-        Ok((_, Err(e))) => {
-            return FileResult {
-                path: path.to_path_buf(),
-                status: crate::report::FileStatus::Error,
-                error: Some(format!("{}", e)),
-            };
-        }
-        Err(e) => {
-            return FileResult {
-                path: path.to_path_buf(),
-                status: crate::report::FileStatus::Error,
-                error: Some(format!("Blocking task error: {}", e)),
-            };
-        }
-    };
-
-    if source == formatted {
-        return FileResult {
-            path: path.to_path_buf(),
-            status: crate::report::FileStatus::Unchanged,
-            error: None,
-        };
-    }
-
-    if mode.check || mode.diff {
-        if mode.diff {
-            print_diff(path, &source, &formatted);
-        }
-        return FileResult {
-            path: path.to_path_buf(),
-            status: crate::report::FileStatus::Changed,
-            error: None,
-        };
-    }
-
-    match tokio::fs::write(path, &formatted).await {
-        Ok(_) => FileResult {
-            path: path.to_path_buf(),
-            status: crate::report::FileStatus::Changed,
-            error: None,
-        },
-        Err(e) => FileResult {
-            path: path.to_path_buf(),
-            status: crate::report::FileStatus::Error,
-            error: Some(format!("Write error: {}", e)),
-        },
-    }
 }
 
 /// Format a single file.

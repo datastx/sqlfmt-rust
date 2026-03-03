@@ -43,14 +43,14 @@ fn test_build_segments() {
     let line1 = make_line(&mut arena, TokenType::Name, "a");
     let line2 = make_line(&mut arena, TokenType::Name, "b");
 
-    let segments = build_segments(&[line1, line2], &arena);
+    let segments = build_segments(vec![line1, line2], &arena);
     assert!(!segments.is_empty());
 }
 
 #[test]
 fn test_build_segments_empty() {
     let arena: Vec<Node> = Vec::new();
-    let segments = build_segments(&[], &arena);
+    let segments = build_segments(vec![], &arena);
     assert!(segments.is_empty());
 }
 
