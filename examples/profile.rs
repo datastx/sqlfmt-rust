@@ -14,7 +14,12 @@ fn main() {
     let mode = Mode::default();
     let iterations = 5000;
 
-    eprintln!("Formatting {} ({} bytes) x {} iterations...", path, sql.len(), iterations);
+    eprintln!(
+        "Formatting {} ({} bytes) x {} iterations...",
+        path,
+        sql.len(),
+        iterations
+    );
 
     for _ in 0..iterations {
         let _ = format_string(sql, &mode).unwrap();

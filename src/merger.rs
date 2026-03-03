@@ -51,8 +51,7 @@ impl LineMerger {
                         self.merge_single_segment(&segments[0], arena, &mut merged_lines);
                     } else {
                         for segment in segments {
-                            merged_lines
-                                .extend(self.maybe_merge_lines(segment.lines, arena));
+                            merged_lines.extend(self.maybe_merge_lines(segment.lines, arena));
                         }
                     }
                 } else {
@@ -581,7 +580,11 @@ impl LineMerger {
         for &split in &split_points {
             let idx = split - offset;
             let tail = remaining.split_off(idx);
-            new_segments.extend(self.try_merge_operator_segments(remaining, remaining_tiers, arena));
+            new_segments.extend(self.try_merge_operator_segments(
+                remaining,
+                remaining_tiers,
+                arena,
+            ));
             remaining = tail;
             offset = split;
         }

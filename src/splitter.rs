@@ -31,8 +31,7 @@ impl LineSplitter {
 
         let mut new_lines: Vec<Line> = Vec::new();
         let rc_comments = std::mem::take(&mut line.comments);
-        let mut comments =
-            std::rc::Rc::try_unwrap(rc_comments).unwrap_or_else(|rc| (*rc).clone());
+        let mut comments = std::rc::Rc::try_unwrap(rc_comments).unwrap_or_else(|rc| (*rc).clone());
         let mut head: usize = 0;
         let mut always_split_after = false;
         let mut never_split_after = false;

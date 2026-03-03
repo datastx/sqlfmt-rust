@@ -277,8 +277,7 @@ fn split_line_at_jinja(line: Line, split_pos: usize, arena: &mut Vec<Node>) -> (
     }
     line2.formatting_disabled = line.formatting_disabled;
 
-    let comments =
-        std::rc::Rc::try_unwrap(line.comments).unwrap_or_else(|rc| (*rc).clone());
+    let comments = std::rc::Rc::try_unwrap(line.comments).unwrap_or_else(|rc| (*rc).clone());
     for comment in comments {
         if comment.is_standalone {
             line2.append_comment(comment);
