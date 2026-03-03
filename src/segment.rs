@@ -140,8 +140,8 @@ pub(crate) fn build_segments(mut lines: Vec<Line>, arena: &[Node]) -> Vec<Segmen
         };
 
         let mut found = false;
-        for i in start_idx..lines.len() {
-            if lines[i].starts_new_segment_at_depth(target_depth, arena) {
+        for (i, line) in lines.iter().enumerate().skip(start_idx) {
+            if line.starts_new_segment_at_depth(target_depth, arena) {
                 split_points.push(i);
                 j = i;
                 found = true;
