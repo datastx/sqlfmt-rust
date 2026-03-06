@@ -379,8 +379,30 @@ fn normalize_jinja_quotes(text: &str) -> String {
                 i += 1;
             }
         } else if bytes[i] == b'\'' {
-            // Single-quoted string delimiter — convert to double quote
-            result.push('"');
+            // Single-quoted string — check if it contains unescaped double quotes.
+            // If so, keep single quotes to avoid producing ambiguous output that
+            // confuses subsequent normalization passes.
+            let mut has_double_quote = false;
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b'\'' {
+                    if j + 1 < bytes.len() && bytes[j + 1] == b'\'' {
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                if bytes[j] == b'"' {
+                    has_double_quote = true;
+                }
+                j += 1;
+            }
+            let out_quote = if has_double_quote { '\'' } else { '"' };
+            result.push(out_quote);
             i += 1;
             while i < bytes.len() {
                 if bytes[i] == b'\\' && i + 1 < bytes.len() {
@@ -397,7 +419,7 @@ fn normalize_jinja_quotes(text: &str) -> String {
                         i += 2;
                         continue;
                     }
-                    result.push('"');
+                    result.push(out_quote);
                     i += 1;
                     break;
                 }
