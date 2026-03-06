@@ -141,3 +141,53 @@ fn test_normalize_jinja_operators() {
     let b = normalize_jinja_operators("a + b");
     assert_eq!(a, b, "Operator spacing should be normalized identically");
 }
+
+#[test]
+fn test_normalize_jinja_quotes_simple() {
+    let result = normalize_jinja_quotes("'hello'");
+    assert_eq!(result, "\"hello\"");
+}
+
+#[test]
+fn test_normalize_jinja_quotes_preserves_singles_inside_doubles() {
+    // Single quotes inside double-quoted strings must not be converted
+    let input = r#"include_types="'type_a', 'type_b'""#;
+    let result = normalize_jinja_quotes(input);
+    assert_eq!(
+        result, input,
+        "Single quotes inside double-quoted strings should be preserved"
+    );
+}
+
+#[test]
+fn test_normalize_jinja_quotes_mixed() {
+    let input = r#"rollup_flag='group_rollup', include_types="'type_a', 'type_b'""#;
+    let result = normalize_jinja_quotes(input);
+    assert_eq!(
+        result,
+        r#"rollup_flag="group_rollup", include_types="'type_a', 'type_b'""#
+    );
+}
+
+#[test]
+fn test_equivalence_dbt_config_nested_quotes() {
+    // This was the failing case: a Jinja expression with single quotes
+    // inside double-quoted string values should pass the safety check.
+    let mode = Mode::default();
+    let source = r#"{{ measures_rollup(rollup_flag="group_rollup", include_types="'type_a', 'type_b'") }}
+"#;
+    let result = format_string(source, &mode);
+    assert!(
+        result.is_ok(),
+        "Jinja with nested quotes should pass safety check: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_normalize_jinja_structure_comma_spacing() {
+    // Spaces before commas should be stripped
+    let a = normalize_jinja_structure(r#""value" , next"#);
+    let b = normalize_jinja_structure(r#""value", next"#);
+    assert_eq!(a, b, "Spaces before commas should be normalized");
+}

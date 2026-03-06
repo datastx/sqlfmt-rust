@@ -319,7 +319,7 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
                 .trim_end_matches("-}}")
                 .trim_end_matches("}}");
             let normalized = join_whitespace(inner);
-            let normalized = normalized.replace('\'', "\"");
+            let normalized = normalize_jinja_quotes(&normalized);
             let normalized = normalize_jinja_operators(&normalized);
             let normalized = normalize_jinja_structure(&normalized);
             format!("{{{{ {} }}}}", normalized)
@@ -334,13 +334,82 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
                 .trim_end_matches("-%}")
                 .trim_end_matches("%}");
             let normalized = join_whitespace(inner);
-            let normalized = normalized.replace('\'', "\"");
+            let normalized = normalize_jinja_quotes(&normalized);
             let normalized = normalize_jinja_operators(&normalized);
             let normalized = normalize_jinja_structure(&normalized);
             format!("{{% {} %}}", normalized)
         }
         _ => join_whitespace(text),
     }
+}
+
+/// Normalize single-quoted string delimiters to double quotes for equivalence,
+/// without modifying single quotes that appear inside double-quoted strings.
+/// E.g. `'hello'` → `"hello"`, but `"'csnp', 'dual'"` stays unchanged.
+fn normalize_jinja_quotes(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut result = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            // Already a double-quoted string — copy it verbatim
+            result.push('"');
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    result.push(bytes[i] as char);
+                    result.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    // Check for doubled-quote escape ""
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                        result.push('"');
+                        result.push('"');
+                        i += 2;
+                        continue;
+                    }
+                    result.push('"');
+                    i += 1;
+                    break;
+                }
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        } else if bytes[i] == b'\'' {
+            // Single-quoted string delimiter — convert to double quote
+            result.push('"');
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    result.push(bytes[i] as char);
+                    result.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'\'' {
+                    // Check for doubled-quote escape ''
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        result.push('\'');
+                        result.push('\'');
+                        i += 2;
+                        continue;
+                    }
+                    result.push('"');
+                    i += 1;
+                    break;
+                }
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    result
 }
 
 /// Normalize structural characters in Jinja content for equivalence.
@@ -401,8 +470,11 @@ fn normalize_jinja_structure(text: &str) -> String {
             continue;
         }
 
-        // After comma, normalize to exactly no space (we strip all optional spaces)
+        // Around comma, normalize spacing (strip spaces before and after)
         if bytes[i] == b',' {
+            // Remove trailing whitespace before comma
+            let trimmed = result.trim_end().len();
+            result.truncate(trimmed);
             result.push(',');
             i += 1;
             // Skip spaces after comma

@@ -1,0 +1,30 @@
+{{
+       config(
+              materialized="table",
+                tags=[
+                     'example_tag'
+                   ],
+              meta={
+                     'final_schema':'analytics'
+              }
+)
+}}
+{{ measures_rollup(rollup_flag="group_rollup" , include_plan_types="'type_a', 'type_b'") }}
+)))))__SQLFMT_OUTPUT__(((((
+{{
+       config(
+              materialized="table",
+                tags=[
+                     'example_tag'
+                   ],
+              meta={
+                     'final_schema':'analytics'
+              }
+)
+}}
+{{
+    measures_rollup(
+        rollup_flag="group_rollup",
+        include_plan_types="'type_a', 'type_b'",
+    )
+}}
