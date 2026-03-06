@@ -114,6 +114,7 @@ golden_tests! {
     golden_unformatted_221_dbt_config_dollar_quoted => (default_mode, "tests/data/unformatted/221_dbt_config_dollar_quoted.sql"),
     golden_unformatted_222_colorado_claims_extract => (default_mode, "tests/data/unformatted/222_colorado_claims_extract.sql"),
     golden_unformatted_222_jinja_unbalanced_brackets => (default_mode, "tests/data/unformatted/222_jinja_unbalanced_brackets.sql"),
+    golden_unformatted_223_dbt_config_nested_quotes => (default_mode, "tests/data/unformatted/223_dbt_config_nested_quotes.sql"),
 
     // =========================================================================
     // Unformatted 300-series — Jinja formatting
