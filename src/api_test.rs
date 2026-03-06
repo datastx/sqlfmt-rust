@@ -153,7 +153,10 @@ fn test_normalize_jinja_quotes_preserves_singles_inside_doubles() {
     // Single quotes inside double-quoted strings must not be converted
     let input = r#"include_types="'type_a', 'type_b'""#;
     let result = normalize_jinja_quotes(input);
-    assert_eq!(result, input, "Single quotes inside double-quoted strings should be preserved");
+    assert_eq!(
+        result, input,
+        "Single quotes inside double-quoted strings should be preserved"
+    );
 }
 
 #[test]
