@@ -1,9 +1,14 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use smallvec::SmallVec;
+
 use crate::comment::Comment;
 use crate::node::{Node, NodeIndex};
 use crate::token::TokenType;
+
+/// SmallVec type for Line nodes — most lines have ≤8 nodes, avoiding heap allocation.
+pub(crate) type NodeVec = SmallVec<[NodeIndex; 8]>;
 
 /// Pre-computed indentation strings for common indent sizes (0..=200).
 /// Avoids allocating a new String on every `indentation()` call.
@@ -34,7 +39,7 @@ pub(crate) fn indent_str(n: usize) -> &'static str {
 #[derive(Debug, Clone)]
 pub(crate) struct Line {
     pub(crate) previous_node: Option<NodeIndex>,
-    pub(crate) nodes: Vec<NodeIndex>,
+    pub(crate) nodes: NodeVec,
     pub(crate) comments: Rc<Vec<Comment>>,
     pub(crate) formatting_disabled: bool,
 }
@@ -43,7 +48,7 @@ impl Line {
     pub(crate) fn new(previous_node: Option<NodeIndex>) -> Self {
         Self {
             previous_node,
-            nodes: Vec::with_capacity(4),
+            nodes: SmallVec::new(),
             comments: Rc::new(Vec::new()),
             formatting_disabled: false,
         }

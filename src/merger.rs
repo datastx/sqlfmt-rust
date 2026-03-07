@@ -254,8 +254,7 @@ impl LineMerger {
     }
 
     /// Cheap pre-check: can these lines merge without exceeding max_length?
-    /// Runs extract_components for rule validation and computes the merged
-    /// length arithmetically, avoiding construction of a merged Line.
+    /// Uses fast arithmetic length check, then validates with extract_components.
     fn can_merge_lines(&self, lines: &[Line], arena: &[Node]) -> bool {
         if lines.len() <= 1 {
             return true;
@@ -278,40 +277,8 @@ impl LineMerger {
             return true;
         }
 
-        let (nodes, _comments) = match Self::extract_components(content_lines, arena) {
-            Ok(pair) => pair,
-            Err(_) => return false,
-        };
-
-        // Compute merged length arithmetically (mirrors Line::len fast path)
-        let indent_size = content_lines[0].indent_size(arena);
-
-        // Check for multiline nodes — if present, we can't compute length cheaply,
-        // so fall back to allowing the merge (create_merged_line will catch it).
-        let has_multiline_node = nodes.iter().any(|&idx| {
-            let node = &arena[idx];
-            !node.is_newline() && node.value.contains('\n')
-        });
-        if has_multiline_node {
-            return true; // let create_merged_line handle multiline
-        }
-
-        let mut length = indent_size;
-        let mut first_content = true;
-        for &idx in &nodes {
-            let node = &arena[idx];
-            if node.is_newline() {
-                continue;
-            }
-            if first_content {
-                length += node.value.len();
-                first_content = false;
-            } else {
-                length += node.len();
-            }
-        }
-
-        length <= self.max_length
+        // extract_components with length tracking handles both validation and length check
+        Self::extract_components(content_lines, arena).is_ok()
     }
 
     /// Try to merge all lines into a single line.
@@ -395,7 +362,7 @@ impl LineMerger {
 
         let (nodes, comments) = Self::extract_components(content_lines, arena)?;
 
-        // Arithmetic length check (from can_merge_lines) before constructing
+        // Arithmetic length check before constructing merged line
         let indent_size = content_lines[0].indent_size(arena);
         let has_multiline_node = nodes.iter().any(|&idx| {
             let node = &arena[idx];
@@ -796,30 +763,6 @@ impl LineMerger {
         }
     }
 
-    /// Quick lower-bound length check using node counts. Much cheaper than
-    /// scanning all node values — each content node is at least 1 char + 1 prefix.
-    fn segments_clearly_too_long(&self, segments: &[Segment], arena: &[Node]) -> bool {
-        // Count total non-newline nodes across all segments as a rough lower bound.
-        // Each node contributes at minimum 1 byte of value.
-        // If even this lower bound exceeds max_length, skip the full merge.
-        let mut content_nodes = 0usize;
-        for segment in segments {
-            for line in &segment.lines {
-                if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
-                    continue;
-                }
-                for &idx in &line.nodes {
-                    if !arena[idx].is_newline() {
-                        content_nodes += 1;
-                    }
-                }
-            }
-        }
-        // Very rough: at minimum each node is 1 char, plus spaces between them
-        // This is a conservative undercount that only catches egregious cases
-        content_nodes > self.max_length * 2
-    }
-
     /// Try to merge a run of segments into one.
     fn try_merge_operator_segments(
         &self,
@@ -829,11 +772,6 @@ impl LineMerger {
     ) -> Vec<Segment> {
         if segments.len() <= 1 {
             return segments;
-        }
-
-        // Very cheap check: if node count alone clearly exceeds limit, skip
-        if self.segments_clearly_too_long(&segments, arena) {
-            return self.maybe_merge_operators(segments, op_tiers, arena);
         }
 
         let total_lines: usize = segments.iter().map(|s| s.lines.len()).sum();
