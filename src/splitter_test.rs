@@ -41,7 +41,7 @@ fn test_split_at_keyword() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![select, name, from, table, nl];
+    line.nodes = smallvec::smallvec![select, name, from, table, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -62,7 +62,7 @@ fn test_split_before_comma() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![a, comma, b, nl];
+    line.nodes = smallvec::smallvec![a, comma, b, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -84,7 +84,7 @@ fn test_split_before_operator() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![a, op, b, nl];
+    line.nodes = smallvec::smallvec![a, op, b, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -104,7 +104,7 @@ fn test_split_before_closing_bracket() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![open, name, close, nl];
+    line.nodes = smallvec::smallvec![open, name, close, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -124,7 +124,7 @@ fn test_split_before_semicolon() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![select, one, semi, nl];
+    line.nodes = smallvec::smallvec![select, one, semi, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -145,7 +145,7 @@ fn test_split_after_opening_bracket() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![name, open, star, close, nl];
+    line.nodes = smallvec::smallvec![name, open, star, close, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -167,7 +167,7 @@ fn test_no_split_bracket_operator() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![arr, bracket, zero, close, nl];
+    line.nodes = smallvec::smallvec![arr, bracket, zero, close, nl];
 
     let _splitter = LineSplitter::new();
     // is_bracket_operator checks previous_sql_token - in our test the [
@@ -184,7 +184,7 @@ fn test_split_formatting_disabled_returns_unchanged() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![a, op, b, nl];
+    line.nodes = smallvec::smallvec![a, op, b, nl];
     line.formatting_disabled = true;
 
     let splitter = LineSplitter::new();
@@ -201,7 +201,7 @@ fn test_split_set_operator() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![one, union, two, nl];
+    line.nodes = smallvec::smallvec![one, union, two, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -244,9 +244,8 @@ fn test_split_between_brackets_array_index() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![
-        name, open1, close1, open2, off, open3, one, close3, close2, nl,
-    ];
+    line.nodes =
+        smallvec::smallvec![name, open1, close1, open2, off, open3, one, close3, close2, nl,];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -261,7 +260,7 @@ fn test_split_between_brackets_array_index() {
 fn test_split_very_long_line_no_crash() {
     // 500+ nodes should split without stack overflow
     let mut arena = Vec::new();
-    let mut nodes = Vec::new();
+    let mut nodes = smallvec::SmallVec::<[usize; 8]>::new();
     for i in 0..500 {
         let name = make_node(
             &mut arena,
@@ -297,7 +296,7 @@ fn test_split_no_terminating_newline() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![select, name, from, table, nl];
+    line.nodes = smallvec::smallvec![select, name, from, table, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -319,7 +318,7 @@ fn test_split_leading_comma_comment() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![comment, name, comma, name2, nl];
+    line.nodes = smallvec::smallvec![comment, name, comma, name2, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -341,7 +340,7 @@ fn test_split_around_set_operator_union() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![one, union, two, nl];
+    line.nodes = smallvec::smallvec![one, union, two, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
@@ -377,7 +376,7 @@ fn test_split_trailing_operator_comment() {
     let nl = make_node(&mut arena, TokenType::Newline, "\n", "");
 
     let mut line = Line::new(None);
-    line.nodes = vec![one, plus, comment, two, nl];
+    line.nodes = smallvec::smallvec![one, plus, comment, two, nl];
 
     let splitter = LineSplitter::new();
     let result = splitter.maybe_split(line, &mut arena);
