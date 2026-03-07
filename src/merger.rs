@@ -360,6 +360,11 @@ impl LineMerger {
             return Ok(lines.to_vec());
         }
 
+        // Quick length pre-check before expensive extract_components validation.
+        if !self.quick_merge_fits(content_lines, arena) {
+            return Err(ControlFlow::CannotMerge);
+        }
+
         let (nodes, comments) = Self::extract_components(content_lines, arena)?;
 
         // Arithmetic length check before constructing merged line
@@ -431,6 +436,9 @@ impl LineMerger {
             let is_standalone_comment = line.is_standalone_comment_line(arena);
             let is_content = !is_blank && !is_standalone_comment;
 
+            // Cache first content node to avoid redundant SmallVec scans
+            let first_content = line.first_content_node(arena);
+
             // --- Inline comment validation ---
             if !line.comments.is_empty() {
                 if has_inline_comment_above {
@@ -447,7 +455,10 @@ impl LineMerger {
             // Leading-comma style: never merge across comma-starting lines.
             // Must check BEFORE setting first_content_seen so that the first
             // content line of a segment (e.g., `, sum(`) is not blocked.
-            if is_content && first_content_seen && line.starts_with_comma(arena) {
+            if is_content
+                && first_content_seen
+                && first_content.map(|n| n.is_comma()).unwrap_or(false)
+            {
                 return Err(ControlFlow::CannotMerge);
             }
 
@@ -463,11 +474,8 @@ impl LineMerger {
 
             // --- Node extraction with merge rule validation ---
             if has_multiline_jinja {
-                let starts_with_op = line
-                    .first_content_node(arena)
-                    .map(|n| n.is_operator(arena))
-                    .unwrap_or(false);
-                let starts_with_comma = line.starts_with_comma(arena);
+                let starts_with_op = first_content.map(|n| n.is_operator(arena)).unwrap_or(false);
+                let starts_with_comma = first_content.map(|n| n.is_comma()).unwrap_or(false);
                 if !starts_with_op && !starts_with_comma {
                     return Err(ControlFlow::CannotMerge);
                 }
@@ -491,17 +499,12 @@ impl LineMerger {
             }
 
             if !nodes.is_empty() {
-                if let Some(first) = line.first_content_node(arena) {
+                if let Some(first) = first_content {
                     if first.token.token_type == crate::token::TokenType::JinjaBlockEnd
                         && jinja_block_depth <= 0
                     {
                         return Err(ControlFlow::CannotMerge);
                     }
-                }
-            }
-
-            if !nodes.is_empty() {
-                if let Some(first) = line.first_content_node(arena) {
                     if first.token.token_type == crate::token::TokenType::On {
                         let line_has_multiline_jinja = line
                             .nodes
@@ -746,21 +749,78 @@ impl LineMerger {
             // blank segment, keep scanning
             Err(_) => true,
             Ok((_, line)) => {
-                let starts_with_comma = line.starts_with_comma(arena);
-                let starts_with_op = line
-                    .first_content_node(arena)
-                    .map(|n| {
-                        n.is_operator(arena)
-                            && !line.previous_token_is_comma(arena)
-                            // Exclude ON from operator sequences — it's handled
-                            // separately by Phase 3 stubborn merge
-                            && n.token.token_type != crate::token::TokenType::On
-                            && OperatorPrecedence::from_node(n, arena) <= max_precedence
-                    })
-                    .unwrap_or(false);
-                starts_with_op || starts_with_comma
+                // Cache first_content_node to avoid double scan
+                let first = match line.first_content_node(arena) {
+                    Some(n) => n,
+                    None => return false,
+                };
+                if first.is_comma() {
+                    return true;
+                }
+                first.is_operator(arena)
+                    && !line.previous_token_is_comma(arena)
+                    && first.token.token_type != crate::token::TokenType::On
+                    && OperatorPrecedence::from_node(first, arena) <= max_precedence
             }
         }
+    }
+
+    /// Compute exact merged line length from content lines in a single pass.
+    /// Returns false if the merge would exceed max_length.
+    /// Bails out (returns true) for multiline nodes where the estimate isn't valid.
+    /// Much cheaper than extract_components — just arithmetic, no validation.
+    fn quick_merge_fits(&self, content_lines: &[Line], arena: &[Node]) -> bool {
+        if content_lines.len() <= 1 {
+            return true;
+        }
+        let first_indent = content_lines[0].indent_size(arena);
+        let mut total = first_indent;
+        let mut first_content = true;
+        for line in content_lines {
+            for &idx in &line.nodes {
+                let node = &arena[idx];
+                if node.is_newline() {
+                    continue;
+                }
+                if node.value.contains('\n') {
+                    return true; // multiline — can't estimate
+                }
+                if first_content {
+                    total += node.value.len();
+                    first_content = false;
+                } else {
+                    total += node.prefix.len() + node.value.len();
+                }
+            }
+        }
+        total <= self.max_length
+    }
+
+    /// Quick length pre-check across segment lines without cloning.
+    /// Same single-pass approach, skipping blank/comment lines.
+    fn quick_merge_fits_segments(&self, segments: &[Segment], arena: &[Node]) -> bool {
+        let mut total: usize = 0;
+        let mut first_content = true;
+        for seg in segments {
+            for line in &seg.lines {
+                for &idx in &line.nodes {
+                    let node = &arena[idx];
+                    if node.is_newline() {
+                        continue;
+                    }
+                    if node.value.contains('\n') {
+                        return true; // multiline — can't estimate
+                    }
+                    if first_content {
+                        total = line.indent_size(arena) + node.value.len();
+                        first_content = false;
+                    } else {
+                        total += node.prefix.len() + node.value.len();
+                    }
+                }
+            }
+        }
+        first_content || total <= self.max_length
     }
 
     /// Try to merge a run of segments into one.
@@ -772,6 +832,11 @@ impl LineMerger {
     ) -> Vec<Segment> {
         if segments.len() <= 1 {
             return segments;
+        }
+
+        // Quick length pre-check before cloning lines.
+        if !self.quick_merge_fits_segments(&segments, arena) {
+            return self.maybe_merge_operators(segments, op_tiers, arena);
         }
 
         let total_lines: usize = segments.iter().map(|s| s.lines.len()).sum();
