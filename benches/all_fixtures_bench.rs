@@ -21,7 +21,7 @@ fn collect_fixtures(dir: &str) -> Vec<(String, String)> {
     if let Ok(entries) = fs::read_dir(&path) {
         for entry in entries.flatten() {
             let file_path = entry.path();
-            if file_path.extension().map_or(false, |e| e == "sql") {
+            if file_path.extension().is_some_and(|e| e == "sql") {
                 let name = file_path.file_stem().unwrap().to_string_lossy().to_string();
                 let content = fs::read_to_string(&file_path).unwrap();
                 let input = extract_input(&content).to_string();
