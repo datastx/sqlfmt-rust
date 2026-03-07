@@ -796,6 +796,30 @@ impl LineMerger {
         }
     }
 
+    /// Quick lower-bound length check using node counts. Much cheaper than
+    /// scanning all node values — each content node is at least 1 char + 1 prefix.
+    fn segments_clearly_too_long(&self, segments: &[Segment], arena: &[Node]) -> bool {
+        // Count total non-newline nodes across all segments as a rough lower bound.
+        // Each node contributes at minimum 1 byte of value.
+        // If even this lower bound exceeds max_length, skip the full merge.
+        let mut content_nodes = 0usize;
+        for segment in segments {
+            for line in &segment.lines {
+                if line.is_blank_line(arena) || line.is_standalone_comment_line(arena) {
+                    continue;
+                }
+                for &idx in &line.nodes {
+                    if !arena[idx].is_newline() {
+                        content_nodes += 1;
+                    }
+                }
+            }
+        }
+        // Very rough: at minimum each node is 1 char, plus spaces between them
+        // This is a conservative undercount that only catches egregious cases
+        content_nodes > self.max_length * 2
+    }
+
     /// Try to merge a run of segments into one.
     fn try_merge_operator_segments(
         &self,
@@ -807,12 +831,17 @@ impl LineMerger {
             return segments;
         }
 
+        // Very cheap check: if node count alone clearly exceeds limit, skip
+        if self.segments_clearly_too_long(&segments, arena) {
+            return self.maybe_merge_operators(segments, op_tiers, arena);
+        }
+
         let total_lines: usize = segments.iter().map(|s| s.lines.len()).sum();
         let mut all_lines = Vec::with_capacity(total_lines);
         for s in &segments {
             all_lines.extend_from_slice(&s.lines);
         }
-        match self.create_merged_line(&all_lines, arena) {
+        match self.try_create_merged_line(&all_lines, arena) {
             Ok(merged) => vec![Segment::new(merged)],
             Err(_) => self.maybe_merge_operators(segments, op_tiers, arena),
         }

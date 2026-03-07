@@ -1,7 +1,8 @@
 [package]
 name = "sqlfmt"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
+autobenches = false
 description = "An opinionated SQL formatter, ported from Python sqlfmt. Optimized for Snowflake and DuckDB."
 license = "Apache-2.0"
 
@@ -31,6 +32,13 @@ compact_str = "0.8"
 memchr = "2"
 phf = { version = "0.11", features = ["macros"] }
 
+[features]
+dhat-heap = ["dep:dhat"]
+
+[dependencies.dhat]
+version = "0.3"
+optional = true
+
 [dev-dependencies]
 pretty_assertions = "1"
 insta = "1"
@@ -42,6 +50,18 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "format_bench"
 harness = false
+
+[[bench]]
+name = "all_fixtures_bench"
+harness = false
+
+[[bin]]
+name = "profile"
+path = "benches/profile.rs"
+
+[[bin]]
+name = "dhat_profile"
+path = "benches/dhat_profile.rs"
 
 [profile.release]
 lto = true
