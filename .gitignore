@@ -25,3 +25,5 @@ target
 
 # Claude Code
 .claude/
+
+dhat-heap.json
