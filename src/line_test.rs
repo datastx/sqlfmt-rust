@@ -9,14 +9,20 @@ fn make_node_in_arena(
 ) -> NodeIndex {
     let idx = arena.len();
     let prev = if idx > 0 { Some(idx - 1) } else { None };
-    arena.push(Node::new(
+    let mut node = Node::new(
         Token::new(token_type, "", value, 0, value.len() as u32),
         prev,
         compact_str::CompactString::from(prefix),
         compact_str::CompactString::from(value),
         0,
         0,
-    ));
+    );
+    node.is_bracket_operator = node.compute_is_bracket_operator(arena);
+    node.is_multiplication_star = node.compute_is_multiplication_star(arena);
+    node.is_operator = node.token.token_type.is_always_operator()
+        || node.is_multiplication_star
+        || node.is_bracket_operator;
+    arena.push(node);
     idx
 }
 

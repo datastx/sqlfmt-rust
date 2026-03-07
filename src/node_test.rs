@@ -33,13 +33,13 @@ fn test_is_multiplication_star() {
     arena.push(make_node(TokenType::Name, "a", None));
     let mut star = make_node(TokenType::Star, "*", Some(0));
     star.token = Token::new(TokenType::Star, "", "*", 2, 3);
-    assert!(star.is_multiplication_star(&arena));
+    assert!(star.compute_is_multiplication_star(&arena));
 
     // Star after SELECT => not multiplication
     let mut arena2 = Vec::new();
     arena2.push(make_node(TokenType::UntermKeyword, "select", None));
     let star2 = make_node(TokenType::Star, "*", Some(0));
-    assert!(!star2.is_multiplication_star(&arena2));
+    assert!(!star2.compute_is_multiplication_star(&arena2));
 }
 
 #[test]
@@ -76,27 +76,27 @@ fn test_is_square_bracket_operator() {
     arena.push(make_node(TokenType::Name, "arr", None));
     let mut bracket = make_node(TokenType::BracketOpen, "[", Some(0));
     bracket.value = CompactString::from("[");
-    assert!(bracket.is_bracket_operator(&arena));
+    assert!(bracket.compute_is_bracket_operator(&arena));
 
     // Square bracket after QuotedName => bracket operator
     let mut arena2 = Vec::new();
     arena2.push(make_node(TokenType::QuotedName, "\"my_col\"", None));
     let mut bracket2 = make_node(TokenType::BracketOpen, "[", Some(0));
     bracket2.value = CompactString::from("[");
-    assert!(bracket2.is_bracket_operator(&arena2));
+    assert!(bracket2.compute_is_bracket_operator(&arena2));
 
     // Square bracket after BracketClose => bracket operator
     let mut arena3 = Vec::new();
     arena3.push(make_node(TokenType::BracketClose, "]", None));
     let mut bracket3 = make_node(TokenType::BracketOpen, "[", Some(0));
     bracket3.value = CompactString::from("[");
-    assert!(bracket3.is_bracket_operator(&arena3));
+    assert!(bracket3.compute_is_bracket_operator(&arena3));
 
     // Square bracket with no previous node => NOT bracket operator
     let arena4: Vec<Node> = Vec::new();
     let mut bracket4 = make_node(TokenType::BracketOpen, "[", None);
     bracket4.value = CompactString::from("[");
-    assert!(!bracket4.is_bracket_operator(&arena4));
+    assert!(!bracket4.compute_is_bracket_operator(&arena4));
 }
 
 #[test]
@@ -125,15 +125,27 @@ fn test_is_operator_context() {
     // A WordOperator is always an operator
     let arena: Vec<Node> = Vec::new();
     let node = make_node(TokenType::WordOperator, "in", None);
-    assert!(node.is_operator(&arena));
+    assert!(
+        node.token.token_type.is_always_operator()
+            || node.compute_is_multiplication_star(&arena)
+            || node.compute_is_bracket_operator(&arena)
+    );
 
     // An Operator token is always an operator
     let node2 = make_node(TokenType::Operator, "+", None);
-    assert!(node2.is_operator(&arena));
+    assert!(
+        node2.token.token_type.is_always_operator()
+            || node2.compute_is_multiplication_star(&arena)
+            || node2.compute_is_bracket_operator(&arena)
+    );
 
     // A Name is NOT an operator
     let node3 = make_node(TokenType::Name, "foo", None);
-    assert!(!node3.is_operator(&arena));
+    assert!(
+        !node3.token.token_type.is_always_operator()
+            && !node3.compute_is_multiplication_star(&arena)
+            && !node3.compute_is_bracket_operator(&arena)
+    );
 }
 
 #[test]

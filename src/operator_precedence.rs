@@ -57,7 +57,7 @@ impl OperatorPrecedence {
     }
 
     /// Determine precedence from a Node.
-    pub(crate) fn from_node(node: &Node, arena: &[Node]) -> Self {
+    pub(crate) fn from_node(node: &Node) -> Self {
         match node.token.token_type {
             TokenType::DoubleColon => Self::DoubleColon,
             TokenType::On => Self::On,
@@ -74,8 +74,8 @@ impl OperatorPrecedence {
             }
             TokenType::WordOperator => Self::from_word_operator(&node.value),
             TokenType::Operator => Self::from_symbol_operator(&node.value),
-            _ if node.is_bracket_operator(arena) => Self::SquareBrackets,
-            _ if node.is_multiplication_star(arena) => Self::Multiplication,
+            _ if node.is_bracket_operator => Self::SquareBrackets,
+            _ if node.is_multiplication_star => Self::Multiplication,
             _ => Self::Other,
         }
     }

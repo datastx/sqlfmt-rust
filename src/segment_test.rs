@@ -4,14 +4,21 @@ use crate::token::{Token, TokenType};
 
 fn make_node(arena: &mut Vec<Node>, tt: TokenType, val: &str) -> usize {
     let idx = arena.len();
-    arena.push(Node::new(
+    let prev = if idx > 0 { Some(idx - 1) } else { None };
+    let mut node = Node::new(
         Token::new(tt, "", val, 0, val.len() as u32),
-        if idx > 0 { Some(idx - 1) } else { None },
+        prev,
         compact_str::CompactString::new(""),
         compact_str::CompactString::from(val),
         0,
         0,
-    ));
+    );
+    node.is_bracket_operator = node.compute_is_bracket_operator(arena);
+    node.is_multiplication_star = node.compute_is_multiplication_star(arena);
+    node.is_operator = node.token.token_type.is_always_operator()
+        || node.is_multiplication_star
+        || node.is_bracket_operator;
+    arena.push(node);
     idx
 }
 

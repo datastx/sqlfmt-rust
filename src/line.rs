@@ -270,7 +270,7 @@ impl Line {
 
     pub(crate) fn starts_with_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
-            .map(|n| n.is_operator(arena))
+            .map(|n| n.is_operator)
             .unwrap_or(false)
     }
 
@@ -311,7 +311,7 @@ impl Line {
     /// True if first node is a bracket operator.
     pub(crate) fn starts_with_bracket_operator(&self, arena: &[Node]) -> bool {
         self.first_content_node(arena)
-            .map(|n| n.is_bracket_operator(arena))
+            .map(|n| n.is_bracket_operator)
             .unwrap_or(false)
     }
 

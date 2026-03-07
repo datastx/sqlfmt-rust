@@ -5,14 +5,20 @@ use crate::token::Token;
 fn make_node(arena: &mut Vec<Node>, tt: TokenType, val: &str, prefix: &str) -> NodeIndex {
     let idx = arena.len();
     let prev = if idx > 0 { Some(idx - 1) } else { None };
-    arena.push(Node::new(
+    let mut node = Node::new(
         Token::new(tt, "", val, 0, val.len() as u32),
         prev,
         CompactString::from(prefix),
         CompactString::from(val),
         0,
         0,
-    ));
+    );
+    node.is_bracket_operator = node.compute_is_bracket_operator(arena);
+    node.is_multiplication_star = node.compute_is_multiplication_star(arena);
+    node.is_operator = node.token.token_type.is_always_operator()
+        || node.is_multiplication_star
+        || node.is_bracket_operator;
+    arena.push(node);
     idx
 }
 
@@ -172,7 +178,7 @@ fn test_no_split_bracket_operator() {
     let _splitter = LineSplitter::new();
     // is_bracket_operator checks previous_sql_token - in our test the [
     // follows Name "arr", so it should be a bracket operator
-    assert!(arena[bracket].is_bracket_operator(&arena));
+    assert!(arena[bracket].compute_is_bracket_operator(&arena));
 }
 
 #[test]
