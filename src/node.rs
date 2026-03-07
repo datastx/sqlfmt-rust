@@ -24,6 +24,13 @@ pub(crate) struct Node {
     pub(crate) jinja_depth: u16,
     /// Whether formatting is disabled (fmt:off region).
     pub(crate) formatting_disabled: bool,
+    /// Cached: whether this node acts as an operator in context.
+    /// Computed once at creation to avoid repeated backward arena walks.
+    pub(crate) is_operator: bool,
+    /// Cached: whether this bracket acts as an operator (e.g., array indexing).
+    pub(crate) is_bracket_operator: bool,
+    /// Cached: whether this STAR token acts as multiplication.
+    pub(crate) is_multiplication_star: bool,
 }
 
 impl Node {
@@ -43,6 +50,9 @@ impl Node {
             bracket_depth,
             jinja_depth,
             formatting_disabled: false,
+            is_operator: false,
+            is_bracket_operator: false,
+            is_multiplication_star: false,
         }
     }
 
@@ -111,8 +121,8 @@ impl Node {
 
     // --- Context-dependent classification ---
 
-    /// True if this STAR token acts as multiplication (not SELECT *).
-    pub(crate) fn is_multiplication_star(&self, arena: &[Node]) -> bool {
+    /// Compute is_multiplication_star (used during node creation to cache).
+    pub(crate) fn compute_is_multiplication_star(&self, arena: &[Node]) -> bool {
         if self.token.token_type != TokenType::Star {
             return false;
         }
@@ -129,8 +139,8 @@ impl Node {
         }
     }
 
-    /// True if this bracket acts as an operator (e.g., array indexing with `[`).
-    pub(crate) fn is_bracket_operator(&self, arena: &[Node]) -> bool {
+    /// Compute is_bracket_operator (used during node creation to cache).
+    pub(crate) fn compute_is_bracket_operator(&self, arena: &[Node]) -> bool {
         if self.token.token_type != TokenType::BracketOpen {
             return false;
         }
@@ -149,13 +159,6 @@ impl Node {
                 }
             }
         }
-    }
-
-    /// True if this node acts as an operator in context.
-    pub(crate) fn is_operator(&self, arena: &[Node]) -> bool {
-        self.token.token_type.is_always_operator()
-            || self.is_multiplication_star(arena)
-            || self.is_bracket_operator(arena)
     }
 
     /// Walk backward through previous_node links, skipping NEWLINE and

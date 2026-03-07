@@ -93,7 +93,7 @@ impl LineSplitter {
         }
         // Split before operators — BUT NOT the AND after BETWEEN,
         // and NOT before cast (::) or colon (:) operators
-        if node.is_operator(arena) {
+        if node.is_operator {
             if node.is_the_and_after_between(arena) {
                 return false;
             }

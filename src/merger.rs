@@ -90,7 +90,7 @@ impl LineMerger {
             && head_idx == 0
             && segment.lines[0]
                 .first_content_node(arena)
-                .map(|n| n.is_operator(arena) && !n.is_bracket_operator(arena))
+                .map(|n| n.is_operator && !n.is_bracket_operator)
                 .unwrap_or(false)
         {
             (head_idx + 2).min(segment.lines.len())
@@ -474,45 +474,20 @@ impl LineMerger {
 
             // --- Node extraction with merge rule validation ---
             if has_multiline_jinja {
-                let starts_with_op = first_content.map(|n| n.is_operator(arena)).unwrap_or(false);
+                let starts_with_op = first_content.map(|n| n.is_operator).unwrap_or(false);
                 let starts_with_comma = first_content.map(|n| n.is_comma()).unwrap_or(false);
                 if !starts_with_op && !starts_with_comma {
                     return Err(ControlFlow::CannotMerge);
                 }
-                let current_has_multiline = line
-                    .nodes
-                    .iter()
-                    .any(|&idx| arena[idx].is_multiline_jinja());
-                if current_has_multiline {
-                    return Err(ControlFlow::CannotMerge);
-                }
             }
 
-            if !nodes.is_empty() && !has_multiline_jinja {
-                let current_has_multiline = line
-                    .nodes
-                    .iter()
-                    .any(|&idx| arena[idx].is_multiline_jinja());
-                if current_has_multiline {
-                    return Err(ControlFlow::CannotMerge);
-                }
-            }
-
-            if !nodes.is_empty() {
+            let had_prior_nodes = !nodes.is_empty();
+            if had_prior_nodes {
                 if let Some(first) = first_content {
                     if first.token.token_type == crate::token::TokenType::JinjaBlockEnd
                         && jinja_block_depth <= 0
                     {
                         return Err(ControlFlow::CannotMerge);
-                    }
-                    if first.token.token_type == crate::token::TokenType::On {
-                        let line_has_multiline_jinja = line
-                            .nodes
-                            .iter()
-                            .any(|&idx| arena[idx].is_multiline_jinja());
-                        if line_has_multiline_jinja {
-                            return Err(ControlFlow::CannotMerge);
-                        }
                     }
                 }
             }
@@ -554,6 +529,13 @@ impl LineMerger {
                 }
                 nodes.push(node_idx);
             }
+            // Multiline jinja validation (deferred from pre-loop to avoid redundant scans).
+            // Only the first content line may contain multiline jinja; subsequent lines
+            // (had_prior_nodes) or lines following multiline jinja (has_multiline_jinja)
+            // are rejected.
+            if line_has_multiline && (has_multiline_jinja || had_prior_nodes) {
+                return Err(ControlFlow::CannotMerge);
+            }
             has_multiline_jinja = line_has_multiline;
             if !line.comments.is_empty() {
                 comments.extend(line.comments.iter().cloned());
@@ -578,8 +560,8 @@ impl LineMerger {
                 let is_standalone_op = head_line
                     .first_content_node(arena)
                     .map(|n| {
-                        n.is_operator(arena)
-                            && !n.is_bracket_operator(arena)
+                        n.is_operator
+                            && !n.is_bracket_operator
                             && head_line.is_standalone_content(arena)
                     })
                     .unwrap_or(false);
@@ -726,7 +708,7 @@ impl LineMerger {
         if let Some(next) = next_segment {
             if let Ok((_, next_line)) = next.head(arena) {
                 if let Some(nn) = next_line.first_content_node(arena) {
-                    if nn.is_boolean_operator() || nn.is_operator(arena) {
+                    if nn.is_boolean_operator() || nn.is_operator {
                         return false;
                     }
                 }
@@ -757,10 +739,10 @@ impl LineMerger {
                 if first.is_comma() {
                     return true;
                 }
-                first.is_operator(arena)
+                first.is_operator
                     && !line.previous_token_is_comma(arena)
                     && first.token.token_type != crate::token::TokenType::On
-                    && OperatorPrecedence::from_node(first, arena) <= max_precedence
+                    && OperatorPrecedence::from_node(first) <= max_precedence
             }
         }
     }
@@ -1035,7 +1017,7 @@ fn line_has_interior_split_points(line: &Line, arena: &[Node]) -> bool {
             continue;
         }
         // These would cause the splitter to split before them
-        if node.is_operator(arena) && !node.is_bracket_operator(arena) {
+        if node.is_operator && !node.is_bracket_operator {
             return true;
         }
         if node.is_boolean_operator() {

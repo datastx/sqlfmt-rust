@@ -68,7 +68,7 @@ impl NodeManager {
             )
         };
 
-        Node {
+        let mut node = Node {
             token,
             previous_node,
             prefix,
@@ -76,7 +76,17 @@ impl NodeManager {
             bracket_depth,
             jinja_depth,
             formatting_disabled,
-        }
+            is_operator: false,
+            is_bracket_operator: false,
+            is_multiplication_star: false,
+        };
+        // Cache operator classification to avoid repeated backward arena walks during merging.
+        node.is_bracket_operator = node.compute_is_bracket_operator(arena);
+        node.is_multiplication_star = node.compute_is_multiplication_star(arena);
+        node.is_operator = node.token.token_type.is_always_operator()
+            || node.is_multiplication_star
+            || node.is_bracket_operator;
+        node
     }
 
     /// Compute the bracket and jinja depths for a new node.
@@ -294,9 +304,7 @@ impl NodeManager {
         // *REPLACE and *EXCLUDE are handled by the star_replace_exclude rule
         if tt == TokenType::Name && prev_type == Some(TokenType::Star) {
             if let Some(prev_node) = prev {
-                if !prev_node.is_multiplication_star(arena)
-                    && token.text.eq_ignore_ascii_case("columns")
-                {
+                if !prev_node.is_multiplication_star && token.text.eq_ignore_ascii_case("columns") {
                     return Cow::Borrowed("");
                 }
             }
