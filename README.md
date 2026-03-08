@@ -9,14 +9,14 @@ An opinionated SQL formatter written in Rust. Ported from [Python sqlfmt](https:
 Prebuilt binaries are available for Linux and macOS from
 [GitHub Releases](https://github.com/datastx/sqlfmt-rust/releases/latest).
 
-> **Note:** Replace `VERSION` below with the release version (e.g. `v0.4.12`).
+> **Note:** Replace `VERSION` below with the release version (e.g. `v0.4.13`).
 > Check the [releases page](https://github.com/datastx/sqlfmt-rust/releases/latest)
 > for the latest version.
 
 **Linux (x86_64):**
 
 ```bash
-VERSION=v0.4.12
+VERSION=v0.4.13
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-x86_64-unknown-linux-musl/sqlfmt" /usr/local/bin/
@@ -25,7 +25,7 @@ sudo mv "sqlfmt-${VERSION}-x86_64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 **Linux (aarch64 / ARM64):**
 
 ```bash
-VERSION=v0.4.12
+VERSION=v0.4.13
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-unknown-linux-musl.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-aarch64-unknown-linux-musl/sqlfmt" /usr/local/bin/
@@ -34,7 +34,7 @@ sudo mv "sqlfmt-${VERSION}-aarch64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 **macOS (Apple Silicon):**
 
 ```bash
-VERSION=v0.4.12
+VERSION=v0.4.13
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-apple-darwin.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-aarch64-apple-darwin/sqlfmt" /usr/local/bin/
@@ -43,7 +43,7 @@ sudo mv "sqlfmt-${VERSION}-aarch64-apple-darwin/sqlfmt" /usr/local/bin/
 **macOS (Intel):**
 
 ```bash
-VERSION=v0.4.12
+VERSION=v0.4.13
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-apple-darwin.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-x86_64-apple-darwin/sqlfmt" /usr/local/bin/
