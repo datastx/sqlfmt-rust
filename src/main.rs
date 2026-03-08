@@ -50,7 +50,7 @@ struct Cli {
     #[arg(short, long)]
     quiet: bool,
 
-    /// Number of threads for parallel processing (0 = auto, max 4).
+    /// Number of threads for parallel processing (0 = all cores).
     #[arg(short = 't', long, default_value_t = 0)]
     threads: usize,
 

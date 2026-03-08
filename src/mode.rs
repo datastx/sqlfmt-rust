@@ -36,7 +36,7 @@ pub struct Mode {
     #[serde(default)]
     pub quiet: bool,
 
-    /// Number of threads for parallel processing (0 = auto, max 4).
+    /// Number of threads for parallel processing (0 = all cores).
     #[serde(default)]
     pub threads: usize,
 

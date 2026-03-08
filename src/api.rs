@@ -84,14 +84,9 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
         let concurrency = if mode.threads > 0 {
             mode.threads
         } else {
-            // Cap default threads: full parallelism is counterproductive for
-            // I/O-bound workloads. For large directories most time is spent in
-            // filesystem reads/writes, so limiting concurrency avoids disk
-            // contention, page-cache thrashing, and excessive context switching.
-            let cores = std::thread::available_parallelism()
+            std::thread::available_parallelism()
                 .map(|n| n.get())
-                .unwrap_or(4);
-            cores.min(4)
+                .unwrap_or(4)
         };
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(concurrency)
