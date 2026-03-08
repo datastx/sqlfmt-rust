@@ -788,9 +788,15 @@ impl JinjaFormatter {
         }
         result.push('\n');
         result.push_str(close_indent);
-        result.push_str(") ");
+        result.push(')');
         if !after_close.is_empty() {
+            // Don't add space before method chain continuation (e.g. ").get(...")
+            if !after_close.starts_with('.') {
+                result.push(' ');
+            }
             result.push_str(after_close);
+            result.push(' ');
+        } else {
             result.push(' ');
         }
         result.push_str(close_delim);
