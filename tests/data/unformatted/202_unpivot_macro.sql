@@ -70,9 +70,9 @@
     {%- set cols = adapter.get_columns_in_relation(relation) %}
 
     {%- for col in cols -%}
-        {%- if col.column.lower() not in remove | map(
-            "lower"
-        ) and col.column.lower() not in exclude | map("lower") -%}
+        {%- 
+            if col.column.lower() not in remove | map("lower") and col.column.lower() not in exclude | map("lower")
+        -%}
             {% do include_cols.append(col) %}
         {%- endif %}
     {%- endfor %}

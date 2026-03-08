@@ -45,6 +45,7 @@ golden_tests! {
     golden_preformatted_400_create_table => (default_mode, "tests/data/preformatted/400_create_table.sql"),
     golden_preformatted_401_create_row_access_policy => (default_mode, "tests/data/preformatted/401_create_row_access_policy.sql"),
     golden_preformatted_402_alter_table => (default_mode, "tests/data/preformatted/402_alter_table.sql"),
+    golden_preformatted_500_jinja_slice_after_func_call => (default_mode, "tests/data/preformatted/500_jinja_slice_after_func_call.sql"),
 
     // =========================================================================
     // Unformatted 100-series — core SQL formatting
@@ -157,5 +158,4 @@ golden_error_tests! {
     golden_error_910_unopened_multiline => "tests/data/errors/910_unopened_multiline.sql",
     golden_error_911_unopened_bracket => "tests/data/errors/911_unopened_bracket.sql",
     golden_error_920_unterminated_multiline => "tests/data/errors/920_unterminated_multiline.sql",
-    golden_error_930_jinja_slice_after_func_call => "tests/data/errors/930_jinja_slice_after_func_call.sql",
 }
