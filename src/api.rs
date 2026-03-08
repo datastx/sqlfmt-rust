@@ -403,6 +403,27 @@ fn normalize_token_text(text: &str, token_type: crate::token::TokenType) -> Stri
     }
 }
 
+/// Push the full UTF-8 character starting at `bytes[i]` into `result`.
+/// Returns the position after the character.
+/// SAFETY: caller must ensure that `bytes` is valid UTF-8.
+#[inline]
+fn push_utf8_char(bytes: &[u8], i: usize, result: &mut String) -> usize {
+    let b = bytes[i];
+    let char_len = if b < 0x80 {
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    };
+    let end = (i + char_len).min(bytes.len());
+    // SAFETY: input is valid UTF-8 and we are slicing at a character boundary
+    result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..end]) });
+    end
+}
+
 /// Normalize single-quoted string delimiters to double quotes for equivalence,
 /// without modifying single quotes that appear inside double-quoted strings.
 /// E.g. `'hello'` → `"hello"`, but `"'csnp', 'dual'"` stays unchanged.
@@ -418,9 +439,9 @@ fn normalize_jinja_quotes(text: &str) -> String {
             i += 1;
             while i < bytes.len() {
                 if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    result.push(bytes[i] as char);
-                    result.push(bytes[i + 1] as char);
-                    i += 2;
+                    result.push('\\');
+                    i += 1;
+                    i = push_utf8_char(bytes, i, &mut result);
                     continue;
                 }
                 if bytes[i] == b'"' {
@@ -435,8 +456,7 @@ fn normalize_jinja_quotes(text: &str) -> String {
                     i += 1;
                     break;
                 }
-                result.push(bytes[i] as char);
-                i += 1;
+                i = push_utf8_char(bytes, i, &mut result);
             }
         } else if bytes[i] == b'\'' {
             // Single-quoted string — check if it contains unescaped double quotes.
@@ -466,9 +486,9 @@ fn normalize_jinja_quotes(text: &str) -> String {
             i += 1;
             while i < bytes.len() {
                 if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    result.push(bytes[i] as char);
-                    result.push(bytes[i + 1] as char);
-                    i += 2;
+                    result.push('\\');
+                    i += 1;
+                    i = push_utf8_char(bytes, i, &mut result);
                     continue;
                 }
                 if bytes[i] == b'\'' {
@@ -483,12 +503,10 @@ fn normalize_jinja_quotes(text: &str) -> String {
                     i += 1;
                     break;
                 }
-                result.push(bytes[i] as char);
-                i += 1;
+                i = push_utf8_char(bytes, i, &mut result);
             }
         } else {
-            result.push(bytes[i] as char);
-            i += 1;
+            i = push_utf8_char(bytes, i, &mut result);
         }
     }
     result
@@ -576,8 +594,7 @@ fn normalize_jinja_structure(text: &str) -> String {
             continue;
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i = push_utf8_char(bytes, i, &mut result);
     }
     result
 }
@@ -619,8 +636,7 @@ fn normalize_jinja_operators(text: &str) -> String {
             continue;
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i = push_utf8_char(bytes, i, &mut result);
     }
     result
 }
