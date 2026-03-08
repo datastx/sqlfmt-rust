@@ -120,16 +120,6 @@ Options:
   -V, --version                    Print version
 ```
 
-### Supported file extensions
-
-sqlfmt processes files with the following extensions:
-
-- `.sql`
-- `.sql.jinja`
-- `.sql.jinja2`
-- `.ddl`
-- `.dml`
-
 ### Environment variables
 
 You can set environment variables to configure behavior without passing flags on every invocation:
