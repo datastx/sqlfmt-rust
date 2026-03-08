@@ -14,6 +14,40 @@ fn test_format_empty_whitespace() {
 }
 
 #[test]
+fn test_format_spaces_only() {
+    let result = format_string("   ", &default_mode()).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_format_tabs_and_spaces() {
+    let result = format_string("  \t  \t  ", &default_mode()).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_format_mixed_whitespace_with_newlines() {
+    let result = format_string("  \n  \t  \n", &default_mode()).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_format_whitespace_strict_mode_errors() {
+    let mut mode = default_mode();
+    mode.strict_whitespace = true;
+    let result = format_string("   ", &mode);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_format_whitespace_strict_mode_allows_valid_sql() {
+    let mut mode = default_mode();
+    mode.strict_whitespace = true;
+    let result = format_string("SELECT 1\n", &mode);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn test_very_long_single_line() {
     let long_name = "a".repeat(500);
     let source = format!("SELECT {}\n", long_name);

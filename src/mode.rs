@@ -42,6 +42,11 @@ pub struct Mode {
 
     #[serde(default)]
     pub single_process: bool,
+
+    /// When true, whitespace-only input is treated as a parse error
+    /// instead of returning an empty string.
+    #[serde(default)]
+    pub strict_whitespace: bool,
 }
 
 fn default_line_length() -> usize {
@@ -81,6 +86,7 @@ impl Default for Mode {
             quiet: false,
             threads: 0,
             single_process: false,
+            strict_whitespace: false,
         }
     }
 }
