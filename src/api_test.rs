@@ -191,3 +191,99 @@ fn test_normalize_jinja_structure_comma_spacing() {
     let b = normalize_jinja_structure(r#""value", next"#);
     assert_eq!(a, b, "Spaces before commas should be normalized");
 }
+
+#[test]
+fn test_normalize_jinja_compound_operators() {
+    // != operator spacing should be normalized
+    let a = normalize_jinja_operators(r#"prefix!=""#);
+    let b = normalize_jinja_operators(r#"prefix != ""#);
+    assert_eq!(a, b, "!= operator spacing should be normalized");
+
+    // == operator spacing should be normalized
+    let a = normalize_jinja_operators(r#"x=="y""#);
+    let b = normalize_jinja_operators(r#"x == "y""#);
+    assert_eq!(a, b, "== operator spacing should be normalized");
+
+    // >= and <= operator spacing should be normalized
+    let a = normalize_jinja_operators("x>=1");
+    let b = normalize_jinja_operators("x >= 1");
+    assert_eq!(a, b, ">= operator spacing should be normalized");
+
+    let a = normalize_jinja_operators("x<=1");
+    let b = normalize_jinja_operators("x <= 1");
+    assert_eq!(a, b, "<= operator spacing should be normalized");
+}
+
+#[test]
+fn test_format_dbt_star_macro() {
+    // Regression test: full dbt_utils star macro with != and single-quoted empty strings.
+    // This macro previously caused an equivalence error because the safety check
+    // didn't normalize != operator spacing (prefix!='' vs prefix != "").
+    let mode = Mode::default();
+    let source = r#"{% macro star(from, relation_alias=False, except=[], prefix='', suffix='', quote_identifiers=True) -%}
+    {{ return(adapter.dispatch('star', 'dbt_utils')(from, relation_alias, except, prefix, suffix, quote_identifiers)) }}
+{% endmacro %}
+{% macro default__star(from, relation_alias=False, except=[], prefix='', suffix='', quote_identifiers=True) -%}
+    {%- do dbt_utils._is_relation(from, 'star') -%}
+    {%- do dbt_utils._is_ephemeral(from, 'star') -%}
+{#-- Prevent querying of db in parsing mode. This works because this macro does not create any new refs. #}
+    {%- if not execute -%}
+        {% do return('*') %}
+    {%- endif -%}
+    {% set cols = dbt_utils.get_filtered_columns_in_relation(from, except) %}
+    {%- if cols|length <= 0 -%}
+        {% if flags.WHICH == 'compile' %}
+            {% set response %}
+*
+/* No columns were returned. Maybe the relation doesn't exist yet
+or all columns were excluded. This star is only output during
+dbt compile, and exists to keep SQLFluff happy. */
+            {% endset %}
+            {% do return(response) %}
+        {% else %}
+            {% do return("/* no columns returned from star() macro */") %}
+        {% endif %}
+    {%- else -%}
+        {%- for col in cols %}
+            {%- if relation_alias %}{{ relation_alias }}.{% else %}{%- endif -%}
+                {%- if quote_identifiers -%}
+{{ adapter.quote(col)|trim }} {%- if prefix!='' or suffix!='' %} as {{ adapter.quote(prefix ~ col ~ suffix)|trim }} {%- endif -%}
+                {%- else -%}
+{{ col|trim }} {%- if prefix!='' or suffix!='' %} as {{ (prefix ~ col ~ suffix)|trim }} {%- endif -%}
+                {% endif %}
+            {%- if not loop.last %},{{ '\n  ' }}{%- endif -%}
+        {%- endfor -%}
+    {% endif %}
+{%- endmacro %}
+"#;
+    // First pass: formatting must succeed (no equivalence error)
+    let result = format_string(source, &mode);
+    assert!(
+        result.is_ok(),
+        "star macro formatting should not cause equivalence error: {:?}",
+        result.err()
+    );
+    let first_pass = result.unwrap();
+
+    // Second pass: must also succeed
+    let result2 = format_string(&first_pass, &mode);
+    assert!(
+        result2.is_ok(),
+        "star macro second-pass formatting should not error: {:?}",
+        result2.err()
+    );
+    let second_pass = result2.unwrap();
+
+    // Idempotency from second pass onward
+    let result3 = format_string(&second_pass, &mode);
+    assert!(
+        result3.is_ok(),
+        "star macro third-pass formatting should not error: {:?}",
+        result3.err()
+    );
+    assert_eq!(
+        second_pass,
+        result3.unwrap(),
+        "star macro should be stable after the second pass"
+    );
+}
