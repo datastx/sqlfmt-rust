@@ -475,7 +475,12 @@ impl JinjaFormatter {
                 if trimmed_len > 0 {
                     let last_byte = result.as_bytes()[trimmed_len - 1];
                     if last_byte.is_ascii_alphanumeric() || last_byte == b'_' || last_byte == b'.' {
-                        result.truncate(trimmed_len);
+                        // Don't strip space before ( if the preceding word is a
+                        // Jinja block keyword (if, for, etc.) — removing it would
+                        // cause the lexer to misidentify the token type.
+                        if !is_jinja_keyword_before_paren(&result[..trimmed_len]) {
+                            result.truncate(trimmed_len);
+                        }
                     }
                 }
                 result.push('(');
@@ -1087,6 +1092,35 @@ fn split_by_tilde(s: &str) -> Vec<&str> {
         }
     }
     parts
+}
+
+/// Check if the word immediately before position `end` in `s` is a Jinja block
+/// keyword that must keep a space before `(` to avoid being misidentified by the
+/// lexer. For example, `if (x)` must not become `if(x)`.
+fn is_jinja_keyword_before_paren(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    // Walk backwards to find the start of the word
+    let mut end = bytes.len();
+    while end > 0 && (bytes[end - 1].is_ascii_alphanumeric() || bytes[end - 1] == b'_') {
+        end -= 1;
+    }
+    let word = &s[end..];
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "if" | "elif"
+            | "for"
+            | "macro"
+            | "call"
+            | "set"
+            | "test"
+            | "snapshot"
+            | "materialization"
+            | "not"
+            | "and"
+            | "or"
+            | "in"
+            | "is"
+    )
 }
 
 #[cfg(test)]
