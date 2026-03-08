@@ -66,10 +66,12 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
 /// Run the formatter on a collection of files.
 ///
 /// Each file is an independent unit of work: read → format → write.
-/// Files are dispatched as concurrent tokio tasks, each using memory-mapped
-/// I/O for zero-copy reads and running CPU formatting on the blocking pool.
-/// This overlaps I/O and CPU work across files for maximum throughput.
+/// Files are processed in parallel using Rayon's thread pool, with
+/// memory-mapped I/O for zero-copy reads. Rayon's work-stealing scheduler
+/// efficiently distributes CPU-bound formatting across all threads.
 pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
+    use rayon::prelude::*;
+
     let matching_paths = get_matching_paths(files, mode);
     let mut report = Report::new();
 
@@ -87,39 +89,16 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
                 .unwrap_or(4)
         };
 
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .max_blocking_threads(concurrency)
-            .enable_all()
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(concurrency)
             .build()
-            .expect("failed to build tokio runtime");
+            .expect("failed to build rayon thread pool");
 
-        let results = rt.block_on(async {
-            let mode = std::sync::Arc::new(mode.clone());
-            let mut handles = Vec::with_capacity(matching_paths.len());
-
-            for path in matching_paths {
-                let mode = mode.clone();
-                handles.push(tokio::spawn(async move {
-                    tokio::task::spawn_blocking(move || format_file(&path, &mode))
-                        .await
-                        .unwrap_or_else(|e| FileResult {
-                            path: PathBuf::new(),
-                            status: crate::report::FileStatus::Error,
-                            error: Some(format!("Task panicked: {}", e)),
-                        })
-                }));
-            }
-
-            let mut results = Vec::with_capacity(handles.len());
-            for handle in handles {
-                results.push(handle.await.unwrap_or_else(|e| FileResult {
-                    path: PathBuf::new(),
-                    status: crate::report::FileStatus::Error,
-                    error: Some(format!("Task panicked: {}", e)),
-                }));
-            }
-            results
+        let results: Vec<FileResult> = pool.install(|| {
+            matching_paths
+                .par_iter()
+                .map(|path| format_file(path, mode))
+                .collect()
         });
 
         for result in results {
