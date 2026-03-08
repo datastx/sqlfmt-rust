@@ -566,3 +566,37 @@ fn test_fixture_jinja_macro_with_method_chains() {
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "Complex jinja macro should be idempotent");
 }
+
+#[test]
+fn test_fixture_dbt_star_macro() {
+    let source = std::fs::read_to_string("tests/fixtures/dbt_star_macro.sql").unwrap();
+    let result = format_string(&source, &default_mode());
+    assert!(
+        result.is_ok(),
+        "Should successfully format dbt_star_macro.sql: {:?}",
+        result.err()
+    );
+    let formatted = result.unwrap();
+    assert!(
+        formatted.contains("{% macro star("),
+        "Should contain macro star: {}",
+        formatted
+    );
+    assert!(
+        formatted.contains("{% endmacro %}"),
+        "Should contain endmacro: {}",
+        formatted
+    );
+    assert!(
+        formatted.contains(r#"prefix != """#),
+        "Should normalize != operator spacing: {}",
+        formatted
+    );
+    // Verify stability after second pass
+    let second = format_string(&formatted, &default_mode()).unwrap();
+    let third = format_string(&second, &default_mode()).unwrap();
+    assert_eq!(
+        second, third,
+        "dbt star macro should be stable after second pass"
+    );
+}
