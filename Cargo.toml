@@ -20,7 +20,7 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 anyhow = "1"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+rayon = "1.10"
 memmap2 = "0.9"
 indicatif = "0.17"
 similar = "2"

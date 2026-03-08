@@ -804,12 +804,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pin-project-lite"
-version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
-
-[[package]]
 name = "plotters"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1131,7 +1125,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "sqlfmt"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1149,13 +1143,13 @@ dependencies = [
  "phf",
  "predicates",
  "pretty_assertions",
+ "rayon",
  "serde",
  "similar",
  "smallvec",
  "tempfile",
  "termcolor",
  "thiserror",
- "tokio",
  "toml",
 ]
 
@@ -1244,15 +1238,6 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "tokio"
-version = "1.50.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
-dependencies = [
- "pin-project-lite",
 ]
 
 [[package]]
