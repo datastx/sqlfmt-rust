@@ -549,6 +549,16 @@ fn normalize_jinja_structure(text: &str) -> String {
             }
             result.push(bytes[i] as char);
             i += 1;
+            // For method chains: strip spaces between ) and . (e.g. ") .get(" → ").get(")
+            if bytes[i - 1] == b')' {
+                let mut j = i;
+                while j < bytes.len() && bytes[j] == b' ' {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b'.' {
+                    i = j; // skip spaces before '.'
+                }
+            }
             continue;
         }
 

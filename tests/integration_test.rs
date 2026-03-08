@@ -472,3 +472,63 @@ fn test_fixture_for_update() {
     let second = format_string(&result, &default_mode()).unwrap();
     assert_eq!(result, second, "For update should be idempotent");
 }
+
+#[test]
+fn test_fixture_jinja_macro_with_method_chains() {
+    let source = r#"{% macro get_meta_objects(model_id, meta_key) %}
+	{% if execute %}
+              {% set meta_columns = [] %}
+	       {% set columns = graph.nodes[model_id]['columns']  %}
+              {% if meta_key is not none %}
+                     {% for column in columns if graph.nodes[model_id]['columns'][column]['meta'][meta_key] | length > 0 %}
+                            {% set meta_dict = graph.nodes[model_id]['columns'][column]['meta'] %}
+                            {% if meta_key in meta_dict %}
+                                   {% set policy_name = meta_dict[meta_key] %}
+                                   {% if "masking_policy_inputs" in meta_dict %}
+                                          {% set inputs = meta_dict['masking_policy_inputs'] %}
+                                   {% else %}
+                                          {% set inputs = [] %}
+                                   {% endif %}
+                                   {% set meta_tuple = (column, policy_name, inputs) %}
+                                   {% do meta_columns.append(meta_tuple) %}
+                            {% endif %}
+                     {% endfor %}
+                     {% for column in columns if graph.nodes[model_id]['columns'][column].get('config', {}).get('meta', {}).get(meta_key, '') | length > 0 %}
+                            {% set meta_dict = graph.nodes[model_id]['columns'][column]['config']['meta'] %}
+                            {% if meta_key in meta_dict %}
+                                   {% set policy_name = meta_dict[meta_key] %}
+                                   {% if "masking_policy_inputs" in meta_dict %}
+                                          {% set inputs = meta_dict['masking_policy_inputs'] %}
+                                   {% else %}
+                                          {% set inputs = [] %}
+                                   {% endif %}
+                                   {% set meta_tuple = (column, policy_name, inputs) %}
+                                   {% do meta_columns.append(meta_tuple) %}
+                            {% endif %}
+                     {% endfor %}
+              {% else %}
+                     {% do meta_columns.append(column|upper) %}
+              {% endif %}
+              {{ return(meta_columns) }}
+       {% endif %}
+{% endmacro %}
+"#;
+    let result = format_string(source, &default_mode()).unwrap();
+    assert!(
+        result.contains("{% macro"),
+        "Should contain macro: {}",
+        result
+    );
+    assert!(
+        result.contains("{% endmacro %}"),
+        "Should contain endmacro: {}",
+        result
+    );
+    assert!(
+        result.contains(".get("),
+        "Should preserve method chains: {}",
+        result
+    );
+    let second = format_string(&result, &default_mode()).unwrap();
+    assert_eq!(result, second, "Complex jinja macro should be idempotent");
+}
