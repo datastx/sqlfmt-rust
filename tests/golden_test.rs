@@ -116,6 +116,7 @@ golden_tests! {
     golden_unformatted_222_jinja_unbalanced_brackets => (default_mode, "tests/data/unformatted/222_jinja_unbalanced_brackets.sql"),
     golden_unformatted_223_dbt_config_nested_quotes => (default_mode, "tests/data/unformatted/223_dbt_config_nested_quotes.sql"),
     golden_unformatted_224_dbt_config_unique_key_nested_quotes => (default_mode, "tests/data/unformatted/224_dbt_config_unique_key_nested_quotes.sql"),
+    golden_unformatted_225_dbt_snowflake_incremental_macro => (default_mode, "tests/data/unformatted/225_dbt_snowflake_incremental_macro.sql"),
 
     // =========================================================================
     // Unformatted 300-series — Jinja formatting
