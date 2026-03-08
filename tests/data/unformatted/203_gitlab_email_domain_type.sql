@@ -40,12 +40,12 @@ END
 # https://github.com/tconbeer/gitlab-analytics-sqlfmt/blob/9360d2f1986c37615926b0416e8d0fb23cae3e6e/LICENSE
 {% macro email_domain_type(email_domain, lead_source) %}
 
-    {%- set personal_email_domains_partial_match = get_personal_email_domain_list(
-        "partial_match"
-    ) -%}
-    {%- set personal_email_domains_full_match = get_personal_email_domain_list(
-        "full_match"
-    ) -%}
+    {%- 
+        set personal_email_domains_partial_match = get_personal_email_domain_list("partial_match")
+    -%}
+    {%- 
+        set personal_email_domains_full_match = get_personal_email_domain_list("full_match")
+    -%}
 
     case
         when

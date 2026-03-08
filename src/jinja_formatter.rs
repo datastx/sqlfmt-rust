@@ -770,6 +770,13 @@ impl JinjaFormatter {
         let after_close = inner[close_pos + 1..].trim();
         let args = split_by_commas(args_content);
 
+        // Don't split a single short argument across lines (e.g. `split("/")`).
+        // Splitting makes the output worse; let the fallback wrapping handle it.
+        if args.len() == 1 && args_content.trim().len() <= 20 && !args_content.trim().ends_with(',')
+        {
+            return None;
+        }
+
         let indent1 = indent_str(base_indent + 4);
         let close_indent = indent_str(base_indent);
 

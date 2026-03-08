@@ -45,6 +45,7 @@ golden_tests! {
     golden_preformatted_400_create_table => (default_mode, "tests/data/preformatted/400_create_table.sql"),
     golden_preformatted_401_create_row_access_policy => (default_mode, "tests/data/preformatted/401_create_row_access_policy.sql"),
     golden_preformatted_402_alter_table => (default_mode, "tests/data/preformatted/402_alter_table.sql"),
+    golden_preformatted_500_jinja_slice_after_func_call => (default_mode, "tests/data/preformatted/500_jinja_slice_after_func_call.sql"),
 
     // =========================================================================
     // Unformatted 100-series — core SQL formatting
