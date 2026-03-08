@@ -121,6 +121,7 @@ golden_tests! {
     // Unformatted 300-series — Jinja formatting
     // =========================================================================
     golden_unformatted_300_jinjafmt => (default_mode, "tests/data/unformatted/300_jinjafmt.sql"),
+    golden_unformatted_301_jinja_macro_method_chains => (default_mode, "tests/data/unformatted/301_jinja_macro_method_chains.sql"),
 
     // =========================================================================
     // Unformatted 400-series — DDL/DML
