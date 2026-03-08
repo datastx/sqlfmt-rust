@@ -19,6 +19,11 @@ struct TokenSnapshot {
 /// Format a SQL string according to the given mode.
 /// This is the core API function.
 pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
+    // Whitespace-only input (spaces, tabs, newlines) is treated as empty.
+    if source.trim().is_empty() {
+        return Ok(String::new());
+    }
+
     let dialect = mode.dialect()?;
 
     let mut analyzer = dialect.initialize_analyzer(mode.line_length);

@@ -148,6 +148,20 @@ fn test_stdin_empty_input() {
 }
 
 #[test]
+fn test_stdin_whitespace_only() {
+    sqlfmt().arg("-").write_stdin("   ").assert().success();
+}
+
+#[test]
+fn test_stdin_whitespace_with_tabs_and_newlines() {
+    sqlfmt()
+        .arg("-")
+        .write_stdin("  \t  \n  \t  \n")
+        .assert()
+        .success();
+}
+
+#[test]
 fn test_stdin_normalizes_trailing_newline() {
     sqlfmt()
         .arg("-")
