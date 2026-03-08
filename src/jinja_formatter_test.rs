@@ -83,9 +83,8 @@ fn test_normalize_preserves_multibyte_utf8() {
     let formatter = JinjaFormatter::new(88);
 
     // Emoji in expression string
-    let result = formatter.normalize_expression(
-        r#"{{ exceptions.raise_compiler_error("❌ missing param") }}"#,
-    );
+    let result = formatter
+        .normalize_expression(r#"{{ exceptions.raise_compiler_error("❌ missing param") }}"#);
     assert_eq!(
         result,
         Some(r#"{{ exceptions.raise_compiler_error("❌ missing param") }}"#.to_string()),
