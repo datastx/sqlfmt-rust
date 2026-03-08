@@ -191,3 +191,41 @@ fn test_normalize_jinja_structure_comma_spacing() {
     let b = normalize_jinja_structure(r#""value", next"#);
     assert_eq!(a, b, "Spaces before commas should be normalized");
 }
+
+#[test]
+fn test_normalize_jinja_compound_operators() {
+    // != operator spacing should be normalized
+    let a = normalize_jinja_operators(r#"prefix!=""#);
+    let b = normalize_jinja_operators(r#"prefix != ""#);
+    assert_eq!(a, b, "!= operator spacing should be normalized");
+
+    // == operator spacing should be normalized
+    let a = normalize_jinja_operators(r#"x=="y""#);
+    let b = normalize_jinja_operators(r#"x == "y""#);
+    assert_eq!(a, b, "== operator spacing should be normalized");
+
+    // >= and <= operator spacing should be normalized
+    let a = normalize_jinja_operators("x>=1");
+    let b = normalize_jinja_operators("x >= 1");
+    assert_eq!(a, b, ">= operator spacing should be normalized");
+
+    let a = normalize_jinja_operators("x<=1");
+    let b = normalize_jinja_operators("x <= 1");
+    assert_eq!(a, b, "<= operator spacing should be normalized");
+}
+
+#[test]
+fn test_format_dbt_star_macro() {
+    // Regression test: dbt_utils star macro with != and single-quoted empty strings
+    let mode = Mode::default();
+    let source = r#"{% macro star(from, prefix='', suffix='') -%}
+    {%- if prefix!='' or suffix!='' %} as {{ col }} {%- endif -%}
+{%- endmacro %}
+"#;
+    let result = format_string(source, &mode);
+    assert!(
+        result.is_ok(),
+        "star macro with != and single quotes should not cause equivalence error: {:?}",
+        result.err()
+    );
+}

@@ -625,6 +625,25 @@ fn normalize_jinja_operators(text: &str) -> String {
             continue;
         }
 
+        // Normalize compound two-character operators: !=, ==, >=, <=
+        if i + 1 < bytes.len() && bytes[i + 1] == b'='
+            && (bytes[i] == b'!' || bytes[i] == b'=' || bytes[i] == b'>' || bytes[i] == b'<')
+        {
+            let trimmed = result.trim_end();
+            let trimmed_len = trimmed.len();
+            result.truncate(trimmed_len);
+            result.push(' ');
+            result.push(bytes[i] as char);
+            result.push(bytes[i + 1] as char);
+            result.push(' ');
+            i += 2;
+            // Skip whitespace after operator
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            continue;
+        }
+
         // Normalize spacing around +, |, ~, =
         let is_eq = bytes[i] == b'='
             && (i + 1 >= bytes.len() || bytes[i + 1] != b'=')
