@@ -124,6 +124,9 @@ golden_tests! {
     // =========================================================================
     golden_unformatted_300_jinjafmt => (default_mode, "tests/data/unformatted/300_jinjafmt.sql"),
     golden_unformatted_301_jinja_macro_method_chains => (default_mode, "tests/data/unformatted/301_jinja_macro_method_chains.sql"),
+    golden_unformatted_302_jinja_compare_row_counts => (default_mode, "tests/data/unformatted/302_jinja_compare_row_counts.sql"),
+    golden_unformatted_303_jinja_audit_helper_queries => (default_mode, "tests/data/unformatted/303_jinja_audit_helper_queries.sql"),
+    golden_unformatted_304_jinja_test_unstructured_data => (default_mode, "tests/data/unformatted/304_jinja_test_unstructured_data.sql"),
 
     // =========================================================================
     // Unformatted 400-series — DDL/DML
@@ -158,4 +161,6 @@ golden_error_tests! {
     golden_error_910_unopened_multiline => "tests/data/errors/910_unopened_multiline.sql",
     golden_error_911_unopened_bracket => "tests/data/errors/911_unopened_bracket.sql",
     golden_error_920_unterminated_multiline => "tests/data/errors/920_unterminated_multiline.sql",
+    golden_error_930_jinja_snowflake_external_table => "tests/data/errors/930_jinja_snowflake_external_table.sql",
+    golden_error_931_jinja_unmatched_closing_brace => "tests/data/errors/931_jinja_unmatched_closing_brace.sql",
 }
