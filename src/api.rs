@@ -64,6 +64,11 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
 }
 
 /// Run the formatter on a collection of files.
+///
+/// Uses a three-phase pipeline to avoid I/O contention at high thread counts:
+/// 1. **Read phase**: Read all files into memory (sequential — avoids disk contention)
+/// 2. **Format phase**: Format all files in parallel (CPU-only, no I/O)
+/// 3. **Write phase**: Write changed files back to disk (sequential)
 pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
     let matching_paths = get_matching_paths(files, mode);
     let mut report = Report::new();
@@ -79,26 +84,105 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
         let concurrency = if mode.threads > 0 {
             mode.threads
         } else {
-            std::thread::available_parallelism()
+            // Cap default threads: full parallelism is counterproductive for
+            // I/O-bound workloads. For large directories most time is spent in
+            // filesystem reads/writes, so limiting concurrency avoids disk
+            // contention, page-cache thrashing, and excessive context switching.
+            let cores = std::thread::available_parallelism()
                 .map(|n| n.get())
-                .unwrap_or(4)
+                .unwrap_or(4);
+            cores.min(4)
         };
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(concurrency)
             .build()
             .expect("failed to build rayon thread pool");
-        let results: Vec<FileResult> = pool.install(|| {
-            matching_paths
-                .par_iter()
-                .map(|path| format_file(path, mode))
+
+        // Phase 1: Read all files into memory (sequential I/O).
+        let sources: Vec<(PathBuf, Result<String, String>)> = matching_paths
+            .into_iter()
+            .map(|path| {
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("Read error: {}", e));
+                (path, content)
+            })
+            .collect();
+
+        // Phase 2: Format in parallel (CPU-only, no I/O).
+        let formatted: Vec<(PathBuf, FormatOutcome)> = pool.install(|| {
+            sources
+                .into_par_iter()
+                .map(|(path, content)| {
+                    let outcome = match content {
+                        Err(err) => FormatOutcome::Error(err),
+                        Ok(source) => match format_string(&source, mode) {
+                            Err(e) => FormatOutcome::Error(format!("{}", e)),
+                            Ok(fmt) if fmt == source => FormatOutcome::Unchanged,
+                            Ok(fmt) => FormatOutcome::Changed {
+                                source,
+                                formatted: fmt,
+                            },
+                        },
+                    };
+                    (path, outcome)
+                })
                 .collect()
         });
-        for result in results {
+
+        // Phase 3: Write changed files and build report (sequential I/O).
+        for (path, outcome) in formatted {
+            let result = match outcome {
+                FormatOutcome::Error(err) => FileResult {
+                    path,
+                    status: crate::report::FileStatus::Error,
+                    error: Some(err),
+                },
+                FormatOutcome::Unchanged => FileResult {
+                    path,
+                    status: crate::report::FileStatus::Unchanged,
+                    error: None,
+                },
+                FormatOutcome::Changed { source, formatted } => {
+                    if mode.check || mode.diff {
+                        if mode.diff {
+                            print_diff(&path, &source, &formatted);
+                        }
+                        FileResult {
+                            path,
+                            status: crate::report::FileStatus::Changed,
+                            error: None,
+                        }
+                    } else {
+                        match std::fs::write(&path, &formatted) {
+                            Ok(_) => FileResult {
+                                path,
+                                status: crate::report::FileStatus::Changed,
+                                error: None,
+                            },
+                            Err(e) => FileResult {
+                                path,
+                                status: crate::report::FileStatus::Error,
+                                error: Some(format!("Write error: {}", e)),
+                            },
+                        }
+                    }
+                }
+            };
             report.add(result);
         }
     }
 
     report
+}
+
+/// Result of formatting a single file's content (used in the pipeline).
+enum FormatOutcome {
+    /// File content is already correctly formatted.
+    Unchanged,
+    /// File content was reformatted. Carries original + formatted for diff output.
+    Changed { source: String, formatted: String },
+    /// An error occurred during read or format.
+    Error(String),
 }
 
 /// Format a single file.

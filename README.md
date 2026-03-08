@@ -113,7 +113,7 @@ Options:
       --exclude <EXCLUDE>          Glob patterns to exclude
   -v, --verbose                    Verbose output
   -q, --quiet                      Quiet output (errors only)
-  -t, --threads <THREADS>          Number of threads for parallel processing (0 = all cores) [default: 0]
+  -t, --threads <THREADS>          Number of threads for parallel processing (0 = auto, max 4) [default: 0]
       --single-process             Disable multi-threaded processing
       --config <CONFIG>            Path to config file (pyproject.toml or sqlfmt.toml)
   -h, --help                       Print help
@@ -127,7 +127,7 @@ You can set environment variables to enable performance options without passing 
 | Variable | Equivalent flag | Description |
 |---|---|---|
 | `SQLFMT_FAST=1` | `--fast` | Skip the safety equivalence check for faster formatting |
-| `SQLFMT_THREADS=N` | `--threads N` | Number of parallel threads (`0` = all cores) |
+| `SQLFMT_THREADS=N` | `--threads N` | Number of parallel threads (`0` = auto, max 4) |
 
 Accepted values for `SQLFMT_FAST`: `1`, `true`, `yes` (case-insensitive). CLI flags always take precedence over environment variables.
 
@@ -147,6 +147,33 @@ sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pypr
 line_length = 100
 dialect = "duckdb"
 exclude = ["migrations/**"]
+```
+
+## Performance
+
+sqlfmt uses a three-phase pipeline for parallel formatting:
+
+1. **Read** all files into memory (sequential)
+2. **Format** in parallel using Rayon (CPU-only, no I/O)
+3. **Write** changed files back to disk (sequential)
+
+This architecture avoids filesystem contention that degrades performance at high
+thread counts. The default auto-detection caps threads at 4, which is optimal for
+most workloads where file I/O is the bottleneck rather than CPU formatting.
+
+To override the thread count for CPU-heavy workloads (e.g. very large SQL files):
+
+```bash
+sqlfmt -t 8 .          # Use 8 threads
+sqlfmt -t 0 .          # Auto (min of cores, 4)
+sqlfmt --single-process .  # Single-threaded
+```
+
+For maximum speed on large directories, combine with `--fast` to skip the safety
+equivalence check:
+
+```bash
+sqlfmt --fast .
 ```
 
 ## Supported platforms
