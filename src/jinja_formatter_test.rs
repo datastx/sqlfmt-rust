@@ -77,3 +77,28 @@ fn test_normalize_inner_whitespace() {
     let result = JinjaFormatter::normalize_inner_whitespace("'hello  world'");
     assert_eq!(result, "'hello  world'");
 }
+
+#[test]
+fn test_normalize_preserves_multibyte_utf8() {
+    let formatter = JinjaFormatter::new(88);
+
+    // Emoji in expression string
+    let result = formatter
+        .normalize_expression(r#"{{ exceptions.raise_compiler_error("❌ missing param") }}"#);
+    assert_eq!(
+        result,
+        Some(r#"{{ exceptions.raise_compiler_error("❌ missing param") }}"#.to_string()),
+    );
+
+    // Emoji outside quotes (in whitespace normalization path)
+    let result = JinjaFormatter::normalize_inner_whitespace("❌  error");
+    assert_eq!(result, "❌ error");
+
+    // Multi-byte chars in operator spacing path
+    let result = JinjaFormatter::add_operator_spaces("café + naïve");
+    assert_eq!(result, "café + naïve");
+
+    // Emoji preserved through quote normalization (single → double)
+    let result = JinjaFormatter::normalize_quotes("'❌ error'");
+    assert_eq!(result, r#""❌ error""#);
+}

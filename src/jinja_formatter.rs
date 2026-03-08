@@ -184,6 +184,27 @@ impl JinjaFormatter {
         buf_a
     }
 
+    /// Push the full UTF-8 character starting at `bytes[i]` into `result`.
+    /// Returns the position after the character.
+    /// SAFETY: caller must ensure that `bytes` is valid UTF-8.
+    #[inline]
+    fn push_utf8_char(bytes: &[u8], i: usize, result: &mut String) -> usize {
+        let b = bytes[i];
+        let char_len = if b < 0x80 {
+            1
+        } else if b < 0xE0 {
+            2
+        } else if b < 0xF0 {
+            3
+        } else {
+            4
+        };
+        let end = (i + char_len).min(bytes.len());
+        // SAFETY: input is valid UTF-8 and we are slicing at a character boundary
+        result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..end]) });
+        end
+    }
+
     /// Normalize internal whitespace in Jinja content, respecting strings.
     /// Collapses runs of whitespace (including newlines) to single spaces,
     /// but preserves whitespace inside string literals.
@@ -213,8 +234,7 @@ impl JinjaFormatter {
                 result.push(' ');
                 in_whitespace = false;
             }
-            result.push(bytes[i] as char);
-            i += 1;
+            i = Self::push_utf8_char(bytes, i, &mut result);
         }
         result
     }
@@ -307,8 +327,7 @@ impl JinjaFormatter {
                 continue;
             }
 
-            result.push(bytes[i] as char);
-            i += 1;
+            i = Self::push_utf8_char(bytes, i, result);
         }
     }
 
@@ -325,8 +344,7 @@ impl JinjaFormatter {
             } else if bytes[i] == b'\'' {
                 i = Self::convert_single_quoted(content, bytes, i, &mut result);
             } else {
-                result.push(bytes[i] as char);
-                i += 1;
+                i = Self::push_utf8_char(bytes, i, &mut result);
             }
         }
         result
@@ -349,8 +367,7 @@ impl JinjaFormatter {
                     i += 3;
                     return i;
                 }
-                result.push(bytes[i] as char);
-                i += 1;
+                i = Self::push_utf8_char(bytes, i, result);
             }
             return i;
         }
@@ -358,16 +375,15 @@ impl JinjaFormatter {
         i += 1;
         while i < bytes.len() && bytes[i] != b'"' {
             if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                result.push(bytes[i] as char);
-                result.push(bytes[i + 1] as char);
-                i += 2;
+                result.push('\\');
+                i += 1;
+                i = Self::push_utf8_char(bytes, i, result);
                 continue;
             }
-            result.push(bytes[i] as char);
-            i += 1;
+            i = Self::push_utf8_char(bytes, i, result);
         }
         if i < bytes.len() {
-            result.push(bytes[i] as char);
+            result.push('"');
             i += 1;
         }
         i
@@ -508,8 +524,7 @@ impl JinjaFormatter {
                 continue;
             }
 
-            result.push(bytes[i] as char);
-            i += 1;
+            i = Self::push_utf8_char(bytes, i, result);
         }
     }
 
@@ -537,8 +552,7 @@ impl JinjaFormatter {
                 continue;
             }
 
-            result.push(bytes[i] as char);
-            i += 1;
+            i = Self::push_utf8_char(bytes, i, result);
         }
     }
 
