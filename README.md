@@ -149,6 +149,24 @@ dialect = "duckdb"
 exclude = ["migrations/**"]
 ```
 
+## Performance
+
+Each SQL file is an independent unit of work. sqlfmt dispatches every file to a
+worker that handles read → format → write end-to-end. By default it uses all
+available cores; use `--threads N` to limit concurrency.
+
+```bash
+sqlfmt -t 8 .              # Limit to 8 workers
+sqlfmt --single-process .  # Single-threaded
+```
+
+For maximum speed on large directories, combine with `--fast` to skip the safety
+equivalence check:
+
+```bash
+sqlfmt --fast .
+```
+
 ## Supported platforms
 
 | Platform             | Architecture | Binary target                    |

@@ -64,6 +64,11 @@ pub fn format_string(source: &str, mode: &Mode) -> Result<String, SqlfmtError> {
 }
 
 /// Run the formatter on a collection of files.
+///
+/// Each file is an independent unit of work: read → format → write.
+/// Files are dispatched as concurrent tokio tasks, each using memory-mapped
+/// I/O for zero-copy reads and running CPU formatting on the blocking pool.
+/// This overlaps I/O and CPU work across files for maximum throughput.
 pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
     let matching_paths = get_matching_paths(files, mode);
     let mut report = Report::new();
@@ -74,8 +79,6 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
             report.add(result);
         }
     } else {
-        use rayon::prelude::*;
-
         let concurrency = if mode.threads > 0 {
             mode.threads
         } else {
@@ -83,16 +86,42 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
                 .map(|n| n.get())
                 .unwrap_or(4)
         };
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(concurrency)
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(concurrency)
+            .enable_all()
             .build()
-            .expect("failed to build rayon thread pool");
-        let results: Vec<FileResult> = pool.install(|| {
-            matching_paths
-                .par_iter()
-                .map(|path| format_file(path, mode))
-                .collect()
+            .expect("failed to build tokio runtime");
+
+        let results = rt.block_on(async {
+            let mode = std::sync::Arc::new(mode.clone());
+            let mut handles = Vec::with_capacity(matching_paths.len());
+
+            for path in matching_paths {
+                let mode = mode.clone();
+                handles.push(tokio::spawn(async move {
+                    tokio::task::spawn_blocking(move || format_file(&path, &mode))
+                        .await
+                        .unwrap_or_else(|e| FileResult {
+                            path: PathBuf::new(),
+                            status: crate::report::FileStatus::Error,
+                            error: Some(format!("Task panicked: {}", e)),
+                        })
+                }));
+            }
+
+            let mut results = Vec::with_capacity(handles.len());
+            for handle in handles {
+                results.push(handle.await.unwrap_or_else(|e| FileResult {
+                    path: PathBuf::new(),
+                    status: crate::report::FileStatus::Error,
+                    error: Some(format!("Task panicked: {}", e)),
+                }));
+            }
+            results
         });
+
         for result in results {
             report.add(result);
         }
@@ -101,10 +130,14 @@ pub fn run(files: &[PathBuf], mode: &Mode) -> Report {
     report
 }
 
-/// Format a single file.
+/// Format a single file using memory-mapped I/O for zero-copy reads.
+///
+/// The file is mapped into memory (no allocation for source data), formatted
+/// in place, and written back only if changed. The mmap avoids copying file
+/// contents into a heap buffer, so the formatter reads directly from OS pages.
 fn format_file(path: &Path, mode: &Mode) -> FileResult {
-    let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
         Err(e) => {
             return FileResult {
                 path: path.to_path_buf(),
@@ -114,7 +147,51 @@ fn format_file(path: &Path, mode: &Mode) -> FileResult {
         }
     };
 
-    let formatted = match format_string(&source, mode) {
+    let metadata = match file.metadata() {
+        Ok(m) => m,
+        Err(e) => {
+            return FileResult {
+                path: path.to_path_buf(),
+                status: crate::report::FileStatus::Error,
+                error: Some(format!("Read error: {}", e)),
+            };
+        }
+    };
+
+    // Empty files can't be mmap'd and have nothing to format.
+    if metadata.len() == 0 {
+        return FileResult {
+            path: path.to_path_buf(),
+            status: crate::report::FileStatus::Unchanged,
+            error: None,
+        };
+    }
+
+    // SAFETY: The file is open and non-empty. Concurrent modification by another
+    // process is the same race condition that read_to_string would have.
+    let mmap = match unsafe { memmap2::Mmap::map(&file) } {
+        Ok(m) => m,
+        Err(e) => {
+            return FileResult {
+                path: path.to_path_buf(),
+                status: crate::report::FileStatus::Error,
+                error: Some(format!("Read error: {}", e)),
+            };
+        }
+    };
+
+    let source = match std::str::from_utf8(&mmap) {
+        Ok(s) => s,
+        Err(e) => {
+            return FileResult {
+                path: path.to_path_buf(),
+                status: crate::report::FileStatus::Error,
+                error: Some(format!("UTF-8 error: {}", e)),
+            };
+        }
+    };
+
+    let formatted = match format_string(source, mode) {
         Ok(f) => f,
         Err(e) => {
             return FileResult {
@@ -125,7 +202,7 @@ fn format_file(path: &Path, mode: &Mode) -> FileResult {
         }
     };
 
-    if source == formatted {
+    if *formatted == *source {
         return FileResult {
             path: path.to_path_buf(),
             status: crate::report::FileStatus::Unchanged,
@@ -135,7 +212,7 @@ fn format_file(path: &Path, mode: &Mode) -> FileResult {
 
     if mode.check || mode.diff {
         if mode.diff {
-            print_diff(path, &source, &formatted);
+            print_diff(path, source, &formatted);
         }
         return FileResult {
             path: path.to_path_buf(),
@@ -143,6 +220,10 @@ fn format_file(path: &Path, mode: &Mode) -> FileResult {
             error: None,
         };
     }
+
+    // Drop the mmap before writing to release the file mapping.
+    drop(mmap);
+    drop(file);
 
     match std::fs::write(path, &formatted) {
         Ok(_) => FileResult {
