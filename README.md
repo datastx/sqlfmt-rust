@@ -151,18 +151,12 @@ exclude = ["migrations/**"]
 
 ## Performance
 
-sqlfmt uses a three-phase pipeline for parallel formatting:
-
-1. **Read** all files into memory (sequential)
-2. **Format** in parallel using Rayon (CPU-only, no I/O)
-3. **Write** changed files back to disk (sequential)
-
-This architecture ensures that all available cores are used for formatting without
-filesystem contention. By default, sqlfmt uses all available cores for the
-formatting phase.
+Each SQL file is an independent unit of work. sqlfmt dispatches every file to a
+worker that handles read → format → write end-to-end. By default it uses all
+available cores; use `--threads N` to limit concurrency.
 
 ```bash
-sqlfmt -t 8 .              # Use 8 threads
+sqlfmt -t 8 .              # Limit to 8 workers
 sqlfmt --single-process .  # Single-threaded
 ```
 
