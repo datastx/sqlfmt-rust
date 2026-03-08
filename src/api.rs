@@ -626,7 +626,8 @@ fn normalize_jinja_operators(text: &str) -> String {
         }
 
         // Normalize compound two-character operators: !=, ==, >=, <=
-        if i + 1 < bytes.len() && bytes[i + 1] == b'='
+        if i + 1 < bytes.len()
+            && bytes[i + 1] == b'='
             && (bytes[i] == b'!' || bytes[i] == b'=' || bytes[i] == b'>' || bytes[i] == b'<')
         {
             let trimmed = result.trim_end();
