@@ -94,6 +94,10 @@ fn main() {
         Err(_) => 0,
     };
 
+    let env_strict_whitespace = std::env::var("SQLFMT_STRICT_WHITESPACE")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
     let mode = Mode {
         line_length: cli.line_length,
         dialect_name: cli.dialect,
@@ -114,6 +118,7 @@ fn main() {
             env_threads
         },
         single_process: cli.single_process,
+        strict_whitespace: env_strict_whitespace,
     };
 
     if is_stdin {

@@ -32,6 +32,22 @@ fn test_format_mixed_whitespace_with_newlines() {
 }
 
 #[test]
+fn test_format_whitespace_strict_mode_errors() {
+    let mut mode = default_mode();
+    mode.strict_whitespace = true;
+    let result = format_string("   ", &mode);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_format_whitespace_strict_mode_allows_valid_sql() {
+    let mut mode = default_mode();
+    mode.strict_whitespace = true;
+    let result = format_string("SELECT 1\n", &mode);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn test_very_long_single_line() {
     let long_name = "a".repeat(500);
     let source = format!("SELECT {}\n", long_name);
