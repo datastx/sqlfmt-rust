@@ -9,14 +9,14 @@ An opinionated SQL formatter written in Rust. Ported from [Python sqlfmt](https:
 Prebuilt binaries are available for Linux and macOS from
 [GitHub Releases](https://github.com/datastx/sqlfmt-rust/releases/latest).
 
-> **Note:** Replace `VERSION` below with the release version (e.g. `v0.3.1`).
+> **Note:** Replace `VERSION` below with the release version (e.g. `v0.4.12`).
 > Check the [releases page](https://github.com/datastx/sqlfmt-rust/releases/latest)
 > for the latest version.
 
 **Linux (x86_64):**
 
 ```bash
-VERSION=v0.3.1
+VERSION=v0.4.12
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-x86_64-unknown-linux-musl/sqlfmt" /usr/local/bin/
@@ -25,7 +25,7 @@ sudo mv "sqlfmt-${VERSION}-x86_64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 **Linux (aarch64 / ARM64):**
 
 ```bash
-VERSION=v0.3.1
+VERSION=v0.4.12
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-unknown-linux-musl.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-aarch64-unknown-linux-musl/sqlfmt" /usr/local/bin/
@@ -34,7 +34,7 @@ sudo mv "sqlfmt-${VERSION}-aarch64-unknown-linux-musl/sqlfmt" /usr/local/bin/
 **macOS (Apple Silicon):**
 
 ```bash
-VERSION=v0.3.1
+VERSION=v0.4.12
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-aarch64-apple-darwin.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-aarch64-apple-darwin/sqlfmt" /usr/local/bin/
@@ -43,7 +43,7 @@ sudo mv "sqlfmt-${VERSION}-aarch64-apple-darwin/sqlfmt" /usr/local/bin/
 **macOS (Intel):**
 
 ```bash
-VERSION=v0.3.1
+VERSION=v0.4.12
 curl -fsSL "https://github.com/datastx/sqlfmt-rust/releases/download/${VERSION}/sqlfmt-${VERSION}-x86_64-apple-darwin.tar.gz" \
   | tar xz
 sudo mv "sqlfmt-${VERSION}-x86_64-apple-darwin/sqlfmt" /usr/local/bin/
@@ -122,14 +122,15 @@ Options:
 
 ### Environment variables
 
-You can set environment variables to enable performance options without passing flags on every invocation:
+You can set environment variables to configure behavior without passing flags on every invocation:
 
 | Variable | Equivalent flag | Description |
 |---|---|---|
 | `SQLFMT_FAST=1` | `--fast` | Skip the safety equivalence check for faster formatting |
 | `SQLFMT_THREADS=N` | `--threads N` | Number of parallel threads (`0` = all cores) |
+| `SQLFMT_STRICT_WHITESPACE=1` | *(no flag)* | Treat whitespace-only input as a parsing error instead of returning empty output |
 
-Accepted values for `SQLFMT_FAST`: `1`, `true`, `yes` (case-insensitive). CLI flags always take precedence over environment variables.
+Accepted values for boolean variables (`SQLFMT_FAST`, `SQLFMT_STRICT_WHITESPACE`): `1`, `true`, `yes` (case-insensitive). CLI flags always take precedence over environment variables.
 
 ```bash
 # Format a large directory as fast as possible
@@ -140,14 +141,22 @@ sqlfmt .
 
 ### Configuration file
 
-sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pyproject.toml`:
+sqlfmt reads settings from `sqlfmt.toml` or the `[tool.sqlfmt]` section of `pyproject.toml`. The file is auto-discovered by searching parent directories of the files being formatted.
 
 ```toml
 # sqlfmt.toml
 line_length = 100
 dialect = "duckdb"
 exclude = ["migrations/**"]
+no_jinjafmt = true
 ```
+
+| Option | Type | Description | Default |
+|---|---|---|---|
+| `line_length` | integer | Maximum line length | `88` |
+| `dialect` | string | SQL dialect (`polyglot` or `duckdb`) | `polyglot` |
+| `exclude` | array of strings | Glob patterns to exclude | `[]` |
+| `no_jinjafmt` | boolean | Disable Jinja template formatting | `false` |
 
 ## Performance
 
