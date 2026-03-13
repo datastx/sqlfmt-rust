@@ -820,7 +820,15 @@ fn try_multi_word_base(first_lower: &str, after_word: &[u8]) -> Option<usize> {
         // DDL multi-word
         "create" => try_create_extension(after_word),
         "alter" => try_alter_extension(after_word),
-        "drop" => try_sequence_any(after_word, &[&["function", "if", "exists"], &["function"]]),
+        "drop" => try_sequence_any(
+            after_word,
+            &[
+                &["semantic", "view", "if", "exists"],
+                &["semantic", "view"],
+                &["function", "if", "exists"],
+                &["function"],
+            ],
+        ),
         "insert" => try_sequence_any(
             after_word,
             &[&["overwrite", "into"], &["overwrite"], &["into"]],
@@ -864,6 +872,15 @@ fn try_create_extension(bytes: &[u8]) -> Option<usize> {
             return Some(wpos + ine);
         }
         return Some(wpos);
+    }
+
+    // Try semantic view [if not exists]
+    if let Some(extra) = try_sequence(&bytes[pos..], &["semantic", "view"]) {
+        let svpos = pos + extra;
+        if let Some(ine) = try_sequence(&bytes[svpos..], &["if", "not", "exists"]) {
+            return Some(svpos + ine);
+        }
+        return Some(svpos);
     }
 
     // Fallback: just "or replace" if matched
@@ -936,6 +953,13 @@ fn try_alter_extension(bytes: &[u8]) -> Option<usize> {
     }
     // Try "warehouse [if exists]"
     if let Some(extra) = try_sequence(bytes, &["warehouse"]) {
+        if let Some(ie) = try_sequence(&bytes[extra..], &["if", "exists"]) {
+            return Some(extra + ie);
+        }
+        return Some(extra);
+    }
+    // Try "semantic view [if exists]"
+    if let Some(extra) = try_sequence(bytes, &["semantic", "view"]) {
         if let Some(ie) = try_sequence(&bytes[extra..], &["if", "exists"]) {
             return Some(extra + ie);
         }

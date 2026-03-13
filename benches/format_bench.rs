@@ -4,7 +4,7 @@ use sqlfmt::{format_string, Mode};
 fn load_test_file(name: &str) -> String {
     let path = format!("tests/data/unformatted/{}", name);
     let content = std::fs::read_to_string(&path).expect(&format!("Failed to read {}", path));
-    // Golden test files use a sentinel to separate input/expected; take only input
+    // Test data files use a sentinel to separate input/expected; take only input
     if let Some(pos) = content.find(")))))__SQLFMT_OUTPUT__(((((") {
         content[..pos].to_string()
     } else {

@@ -1,4 +1,4 @@
-//! Shared test helpers for integration and golden tests.
+//! Shared test helpers for integration tests.
 //!
 //! Only uses the public API (`sqlfmt::format_string`, `sqlfmt::Mode`).
 
@@ -20,9 +20,8 @@ pub fn duckdb_mode() -> Mode {
     }
 }
 
-/// Read a golden test data file and return (source, expected) tuple.
+/// Read a test data file and return (source, expected) tuple.
 ///
-/// Mirrors the Python `read_test_data()` logic exactly:
 /// - If the file contains the sentinel, lines above = source, lines below = expected
 /// - If no sentinel, the file is preformatted: expected = source
 /// - Source is trimmed + "\n"; expected preserves exact whitespace
@@ -77,8 +76,8 @@ pub fn read_test_data(path: &str) -> (String, String) {
     (source, expected)
 }
 
-/// Run a golden test: format source, compare to expected, check idempotency.
-pub fn run_golden_test(path: &str, mode: &Mode) {
+/// Run a format test: format source, compare to expected, check idempotency.
+pub fn run_format_test(path: &str, mode: &Mode) {
     let (source, expected) = read_test_data(path);
     let actual = format_string(&source, mode).unwrap_or_else(|e| {
         panic!("format_string failed for {}: {}", path, e);
@@ -99,8 +98,8 @@ pub fn run_golden_test(path: &str, mode: &Mode) {
     );
 }
 
-/// Run a golden error test: formatting should produce an error.
-pub fn run_golden_error_test(path: &str) {
+/// Run an error test: formatting should produce an error.
+pub fn run_error_test(path: &str) {
     let content = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read error test file {}: {}", path, e));
     let source = format!("{}\n", content.trim());
