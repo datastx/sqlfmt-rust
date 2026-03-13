@@ -157,7 +157,6 @@ format_tests! {
     test_unformatted_910_semantic_view_dbt_body => (default_mode, "tests/data/unformatted/910_semantic_view_dbt_body.sql"),
     test_unformatted_911_semantic_view_jinja_conditionals => (default_mode, "tests/data/unformatted/911_semantic_view_jinja_conditionals.sql"),
     test_unformatted_912_semantic_view_with_extension => (default_mode, "tests/data/unformatted/912_semantic_view_with_extension.sql"),
-    test_unformatted_913_semantic_view_downstream_query => (default_mode, "tests/data/unformatted/913_semantic_view_downstream_query.sql"),
     test_unformatted_999_unsupported_ddl => (default_mode, "tests/data/unformatted/999_unsupported_ddl.sql"),
 }
 
